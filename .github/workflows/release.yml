@@ -1,9 +1,9 @@
 name: Release
 
 on:
-  push:        # 任意分支的 push 都会触发
-  pull_request: # PR 打开/同步/重新打开 时也会触发
-  workflow_dispatch: # 手动触发
+  push:        # 任意分支的 push 都会触发（但作业会根据提交信息判断是否实际运行）
+  pull_request: # PR 打开/同步/重新打开 时也会触发（但作业会根据 PR 标题/正文判断是否实际运行）
+  workflow_dispatch: # 手动触发（可传入 inputs）
 
 permissions:
   contents: write
@@ -12,26 +12,37 @@ permissions:
 jobs:
   releaser:
     runs-on: ubuntu-latest
+    # 只有在如下任一位置包含 "打包" 时才会运行该 job：
+    # - push 的 commits 中任何一个 commit message
+    # - head_commit.message（冗余兼容）
+    # - pull request 的 title 或 body
+    # - workflow_dispatch 的 inputs.commit_message（如果通过手动触发并传入该输入）
+    if: >-
+      contains(join(github.event.commits.*.message, '\n') || '', '打包') ||
+      contains(github.event.head_commit.message || '', '打包') ||
+      contains(github.event.pull_request.title || '', '打包') ||
+      contains(github.event.pull_request.body || '', '打包') ||
+      contains(github.event.inputs.commit_message || '', '打包')
+
     steps:
       - name: Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Create or update local semver pre-release tag
+      - name: Create or update local semver tag (stable, non-prerelease)
         run: |
           # 配置提交者信息（用于创建 tag）
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 固定前缀 v0.0.0，使用运行号生成唯一的 pre-release 后缀
-          PREFIX="v0.0.0"
-          TAG="${PREFIX}-rc.${GITHUB_RUN_NUMBER}"
-          # 在当前提交上强制创建/更新本地 tag
+          # 使用固定的稳定语义化版本（非 pre-release）
+          # 注意：这会在每次运行时强制覆盖同名 tag 和对应的 Release
+          TAG="v0.0.0"
           git tag -f "$TAG" $GITHUB_SHA
 
-          echo "Created local tag: $TAG"
-          # 注意：不把 tag 推回远端，以避免触发额外的 workflow 循环。
+          echo "Created/updated local tag: $TAG"
+          # 不把 tag 推回远端，避免触发循环 workflow。
           # goreleaser 会使用本地的 tag 来生成 release（并通过 API 将 release 上传到 GitHub）。
 
       - name: Setup Go
