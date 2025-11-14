@@ -172,46 +172,104 @@ func (app *App) addConfig(c *gin.Context) {
 		return
 	}
 
-	// 解析YAML配置
+	// 解析YAML配置以检查重复
 	var yamlData map[string]any
 	if err := yaml.Unmarshal(configData, &yamlData); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析配置文件失败: %v", err)})
 		return
 	}
 
-	// 获取现有的sub-urls
-	var subUrls []string
+	// 获取现有的sub-urls并检查是否已存在
 	if existing, ok := yamlData["sub-urls"]; ok {
 		if urls, ok := existing.([]any); ok {
 			for _, url := range urls {
 				if strUrl, ok := url.(string); ok {
-					subUrls = append(subUrls, strUrl)
+					if strUrl == req.SubUrl {
+						c.JSON(http.StatusConflict, gin.H{"error": "该订阅链接已存在"})
+						return
+					}
 				}
 			}
 		}
 	}
 
-	// 检查是否已存在相同的URL
-	for _, existingUrl := range subUrls {
-		if existingUrl == req.SubUrl {
-			c.JSON(http.StatusConflict, gin.H{"error": "该订阅链接已存在"})
-			return
+	// 使用字符串追加的方式，保留原有格式和注释
+	// 重新读取文件以逐行处理
+	file, err := os.Open(app.configPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("打开配置文件失败: %v", err)})
+		return
+	}
+	defer file.Close()
+
+	var newLines []string
+	scanner := bufio.NewScanner(file)
+	inSubUrls := false
+	subUrlsIndent := ""
+	lastSubUrlLine := -1
+	lineNum := 0
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		newLines = append(newLines, line)
+		
+		// 检测 sub-urls 部分
+		if !inSubUrls && (line == "sub-urls:" || line == "sub-urls: []") {
+			inSubUrls = true
+			lastSubUrlLine = lineNum
+			// 如果是空数组，直接替换这行
+			if line == "sub-urls: []" {
+				newLines[lineNum] = "sub-urls:"
+			}
+		} else if inSubUrls {
+			// 检测缩进（通常是2或4个空格）
+			if len(line) > 0 && (line[0] == ' ' || line[0] == '-') {
+				// 找到 sub-urls 下的项
+				for i, ch := range line {
+					if ch == '-' {
+						subUrlsIndent = line[:i]
+						lastSubUrlLine = lineNum
+						break
+					}
+				}
+			} else if len(line) > 0 && line[0] != ' ' && line[0] != '#' {
+				// 遇到新的顶级配置项，sub-urls 部分结束
+				inSubUrls = false
+			}
 		}
+		lineNum++
 	}
 
-	// 添加新的sub-url
-	subUrls = append(subUrls, req.SubUrl)
-	yamlData["sub-urls"] = subUrls
-
-	// 将更新后的配置转换为YAML
-	updatedData, err := yaml.Marshal(yamlData)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("生成配置文件失败: %v", err)})
+	if err := scanner.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("读取配置文件失败: %v", err)})
 		return
 	}
 
+	// 确定缩进（默认2个空格）
+	if subUrlsIndent == "" {
+		subUrlsIndent = "  "
+	}
+
+	// 在 sub-urls 部分的最后添加新的 URL
+	newUrlLine := fmt.Sprintf("%s- %s", subUrlsIndent, req.SubUrl)
+	if lastSubUrlLine >= 0 {
+		// 在 sub-urls 的最后一行后插入
+		newLines = append(newLines[:lastSubUrlLine+1], append([]string{newUrlLine}, newLines[lastSubUrlLine+1:]...)...)
+	} else {
+		// 如果没有找到 sub-urls，添加到文件末尾
+		newLines = append(newLines, "sub-urls:", newUrlLine)
+	}
+
 	// 写入更新后的配置
-	if err := os.WriteFile(app.configPath, updatedData, 0644); err != nil {
+	newContent := ""
+	for i, line := range newLines {
+		newContent += line
+		if i < len(newLines)-1 {
+			newContent += "\n"
+		}
+	}
+
+	if err := os.WriteFile(app.configPath, []byte(newContent), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("保存配置文件失败: %v", err)})
 		return
 	}
