@@ -1,10 +1,10 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
-      
+  push:        # 现在对任意分支的任意 push 都会触发
+  pull_request: # 也在 PR（打开/同步/重新打开）时触发
+  workflow_dispatch: # 手动触发
+
 permissions:
   contents: write
   packages: write
@@ -12,6 +12,8 @@ permissions:
 jobs:
   releaser:
     runs-on: ubuntu-latest
+    # 仅在 tag push 时才真正运行发布步骤（保留原有行为以避免误发布）
+    # if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Checkout
         uses: actions/checkout@v3
