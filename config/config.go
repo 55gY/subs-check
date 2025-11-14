@@ -1,6 +1,13 @@
 package config
 
-import _ "embed"
+import (
+	_ "embed"
+	"bufio"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+)
 
 type Config struct {
 	PrintProgress        bool     `yaml:"print-progress"`
@@ -62,6 +69,7 @@ type Config struct {
 	GithubProxy          string   `yaml:"github-proxy"`
 	Proxy                string   `yaml:"proxy"`
 	CallbackScript       string   `yaml:"callback-script"`
+	RemoveFailedSub      bool     `yaml:"remove-failed-sub"`
 }
 
 var GlobalConfig = &Config{
@@ -79,3 +87,78 @@ var GlobalConfig = &Config{
 var DefaultConfigTemplate []byte
 
 var GlobalProxies []map[string]any
+
+// GlobalConfigPath 全局配置文件路径
+var GlobalConfigPath string
+
+// RemoveSubUrlFromConfig 从配置文件中删除指定的订阅链接（保留注释和格式）
+func RemoveSubUrlFromConfig(subUrl string) error {
+	if GlobalConfigPath == "" {
+		return fmt.Errorf("配置文件路径未设置")
+	}
+	return RemoveSubUrl(GlobalConfigPath, subUrl)
+}
+
+// RemoveSubUrl 从配置文件中删除指定的订阅链接（保留注释和格式）
+func RemoveSubUrl(configPath, subUrl string) error {
+	// 读取配置文件
+	file, err := os.Open(configPath)
+	if err != nil {
+		return fmt.Errorf("打开配置文件失败: %w", err)
+	}
+	defer file.Close()
+
+	var newLines []string
+	scanner := bufio.NewScanner(file)
+	inSubUrls := false
+	subUrlsIndent := ""
+	
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmedLine := strings.TrimSpace(line)
+		
+		// 检测 sub-urls 部分
+		if !inSubUrls && (trimmedLine == "sub-urls:" || trimmedLine == "sub-urls: []") {
+			inSubUrls = true
+			newLines = append(newLines, line)
+			continue
+		}
+		
+		if inSubUrls {
+			// 检测缩进
+			if len(line) > 0 && line[0] == ' ' {
+				// 找到 sub-urls 下的项
+				for i, ch := range line {
+					if ch == '-' {
+						subUrlsIndent = line[:i]
+						// 提取URL部分（去掉 "- " 和前后空格）
+						urlPart := strings.TrimSpace(line[i+1:])
+						// 如果这行包含要删除的URL，跳过这一行
+						if urlPart == subUrl {
+							slog.Info("从配置文件中删除失败的订阅链接", "url", subUrl)
+							continue
+						}
+						break
+					}
+				}
+			} else if len(line) > 0 && line[0] != ' ' && line[0] != '#' {
+				// 遇到新的顶级配置项，sub-urls 部分结束
+				inSubUrls = false
+			}
+		}
+		
+		newLines = append(newLines, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("读取配置文件失败: %w", err)
+	}
+
+	// 写入更新后的配置
+	newContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(configPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("保存配置文件失败: %w", err)
+	}
+
+	return nil
+}

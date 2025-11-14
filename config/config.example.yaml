@@ -166,6 +166,14 @@ s3-bucket-lookup: "auto"
 
 # 重试次数(获取订阅失败后重试次数)
 sub-urls-retry: 3
+# 重试间隔(秒)
+sub-urls-retry-interval: 1
+# 订阅链接超时时间(秒)
+sub-urls-timeout: 10
+# 自动删除获取失败的订阅链接
+# 如果设置为true，当订阅链接获取失败时，会自动从配置文件的sub-urls中删除该链接
+# 注意：删除操作会保留配置文件中的注释和格式
+remove-failed-sub: false
 # 获取订阅时使用的UA；如果设置random将会使用随机UA获取订阅
 # sub-urls-get-ua: "random"
 sub-urls-get-ua: "clash.meta (https://github.com/beck-8/subs-check)"

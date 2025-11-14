@@ -34,6 +34,7 @@ func GetProxies() ([]map[string]any, error) {
 	var wg sync.WaitGroup
 	proxyChan := make(chan map[string]any, 1)                              // 缓冲通道存储解析的代理
 	concurrentLimit := make(chan struct{}, config.GlobalConfig.Concurrent) // 限制并发数
+	failedSubsChan := make(chan string, len(subUrls))                      // 收集失败的订阅链接
 
 	// 启动收集结果的协程
 	var mihomoProxies []map[string]any
@@ -57,6 +58,10 @@ func GetProxies() ([]map[string]any, error) {
 			data, err := GetDateFromSubs(url)
 			if err != nil {
 				slog.Error(fmt.Sprintf("获取订阅链接错误跳过: %v", err))
+				// 如果启用了自动删除失败的订阅，将URL添加到失败列表
+				if config.GlobalConfig.RemoveFailedSub {
+					failedSubsChan <- url
+				}
 				return
 			}
 
@@ -130,7 +135,25 @@ func GetProxies() ([]map[string]any, error) {
 	// 等待所有工作协程完成
 	wg.Wait()
 	close(proxyChan)
+	close(failedSubsChan)
 	<-done // 等待收集完成
+
+	// 处理失败的订阅链接（如果启用了自动删除）
+	if config.GlobalConfig.RemoveFailedSub {
+		failedSubs := make([]string, 0)
+		for failedUrl := range failedSubsChan {
+			failedSubs = append(failedSubs, failedUrl)
+		}
+		
+		if len(failedSubs) > 0 {
+			slog.Warn(fmt.Sprintf("检测到 %d 个失败的订阅链接，将从配置文件中删除", len(failedSubs)))
+			for _, failedUrl := range failedSubs {
+				if err := config.RemoveSubUrlFromConfig(failedUrl); err != nil {
+					slog.Error(fmt.Sprintf("删除失败的订阅链接时出错: %v", err), "url", failedUrl)
+				}
+			}
+		}
+	}
 
 	return mihomoProxies, nil
 }

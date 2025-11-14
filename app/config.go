@@ -25,6 +25,8 @@ func (app *App) initConfigPath() error {
 
 		app.configPath = filepath.Join(configDir, "config.yaml")
 	}
+	// 设置全局配置文件路径，供其他包使用
+	config.GlobalConfigPath = app.configPath
 	return nil
 }
 
