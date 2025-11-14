@@ -61,6 +61,7 @@ func (app *App) initHttpServer() error {
 			// 配置相关API
 			api.GET("/config", app.getConfig)
 			api.POST("/config", app.updateConfig)
+			api.POST("/config/add", app.addConfig)
 
 			// 状态相关API
 			api.GET("/status", app.getStatus)
@@ -146,6 +147,80 @@ func (app *App) updateConfig(c *gin.Context) {
 
 	// 配置文件监听器会自动重新加载配置
 	c.JSON(http.StatusOK, gin.H{"message": "配置已更新"})
+}
+
+// addConfig 向配置文件的sub-urls中新增一条数据
+func (app *App) addConfig(c *gin.Context) {
+	var req struct {
+		SubUrl string `json:"sub_url"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求格式"})
+		return
+	}
+
+	if req.SubUrl == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sub_url不能为空"})
+		return
+	}
+
+	// 读取现有配置
+	configData, err := os.ReadFile(app.configPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("读取配置文件失败: %v", err)})
+		return
+	}
+
+	// 解析YAML配置
+	var yamlData map[string]any
+	if err := yaml.Unmarshal(configData, &yamlData); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析配置文件失败: %v", err)})
+		return
+	}
+
+	// 获取现有的sub-urls
+	var subUrls []string
+	if existing, ok := yamlData["sub-urls"]; ok {
+		if urls, ok := existing.([]any); ok {
+			for _, url := range urls {
+				if strUrl, ok := url.(string); ok {
+					subUrls = append(subUrls, strUrl)
+				}
+			}
+		}
+	}
+
+	// 检查是否已存在相同的URL
+	for _, existingUrl := range subUrls {
+		if existingUrl == req.SubUrl {
+			c.JSON(http.StatusConflict, gin.H{"error": "该订阅链接已存在"})
+			return
+		}
+	}
+
+	// 添加新的sub-url
+	subUrls = append(subUrls, req.SubUrl)
+	yamlData["sub-urls"] = subUrls
+
+	// 将更新后的配置转换为YAML
+	updatedData, err := yaml.Marshal(yamlData)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("生成配置文件失败: %v", err)})
+		return
+	}
+
+	// 写入更新后的配置
+	if err := os.WriteFile(app.configPath, updatedData, 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("保存配置文件失败: %v", err)})
+		return
+	}
+
+	// 配置文件监听器会自动重新加载配置
+	c.JSON(http.StatusOK, gin.H{
+		"message": "订阅链接已添加",
+		"sub_url": req.SubUrl,
+	})
 }
 
 // getStatus 获取应用状态
