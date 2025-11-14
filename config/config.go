@@ -111,7 +111,6 @@ func RemoveSubUrl(configPath, subUrl string) error {
 	var newLines []string
 	scanner := bufio.NewScanner(file)
 	inSubUrls := false
-	subUrlsIndent := ""
 	
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -130,7 +129,6 @@ func RemoveSubUrl(configPath, subUrl string) error {
 				// 找到 sub-urls 下的项
 				for i, ch := range line {
 					if ch == '-' {
-						subUrlsIndent = line[:i]
 						// 提取URL部分（去掉 "- " 和前后空格）
 						urlPart := strings.TrimSpace(line[i+1:])
 						// 如果这行包含要删除的URL，跳过这一行
