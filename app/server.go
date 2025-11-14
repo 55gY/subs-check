@@ -149,6 +149,7 @@ func (app *App) updateConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "配置已更新"})
 }
 
+
 // addConfig 向配置文件的sub-urls中新增一条数据
 func (app *App) addConfig(c *gin.Context) {
 	var req struct {
