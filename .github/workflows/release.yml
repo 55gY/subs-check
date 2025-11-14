@@ -36,9 +36,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 使用固定的稳定语义化版本（非 pre-release）
-          # 注意：这会在每次运行时强制覆盖同名 tag 和对应的 Release
-          TAG="v0.0.0"
+          # 使用 workflow 运行次数作为版本后缀
+          TAG="v0.0.0-${{ github.run_number }}"
           git tag -f "$TAG" $GITHUB_SHA
 
           echo "Created/updated local tag: $TAG"
