@@ -139,38 +139,46 @@ else
     echo -e "${GREEN}✓ 文件已具有可执行权限${NC}"
 fi
 
-# 检查服务是否已存在
+# 检查服务是否已存在并运行
 if [ -f "${SERVICE_PATH}" ]; then
     echo -e "${YELLOW}检测到服务已存在${NC}"
-    echo "服务文件: ${SERVICE_PATH}"
     
-    # 询问是否重新创建
-    read -p "是否要重新创建服务? (y/n): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${GREEN}跳过服务创建，直接启动服务...${NC}"
+    # 检查服务是否正在运行
+    if systemctl is-active --quiet ${SERVICE_NAME}; then
+        echo -e "${GREEN}服务当前状态: 运行中${NC}"
         
-        # 重新加载 systemd 配置
-        systemctl daemon-reload
+        # 询问是否重启服务
+        read -p "是否要重新启动服务? (y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "${GREEN}保持服务运行状态${NC}"
+            echo ""
+            echo -e "${GREEN}=== 服务状态 ===${NC}"
+            systemctl status ${SERVICE_NAME} --no-pager
+            exit 0
+        fi
         
-        # 启动服务
-        systemctl start ${SERVICE_NAME}
+        # 重启服务
+        echo -e "${YELLOW}正在重启服务...${NC}"
+        systemctl restart ${SERVICE_NAME}
+        echo -e "${GREEN}✓ 服务已重启${NC}"
         
-        # 设置开机自启
-        systemctl enable ${SERVICE_NAME}
+        # 等待服务启动
+        sleep 2
         
         # 显示服务状态
         echo ""
         echo -e "${GREEN}=== 服务状态 ===${NC}"
         systemctl status ${SERVICE_NAME} --no-pager
-        
         exit 0
+    else
+        echo -e "${YELLOW}服务当前状态: 未运行${NC}"
+        echo -e "${GREEN}将重新创建并启动服务...${NC}"
+        
+        # 停止并禁用现有服务
+        systemctl stop ${SERVICE_NAME} 2>/dev/null || true
+        systemctl disable ${SERVICE_NAME} 2>/dev/null || true
     fi
-    
-    # 停止现有服务
-    echo "停止现有服务..."
-    systemctl stop ${SERVICE_NAME} 2>/dev/null || true
-    systemctl disable ${SERVICE_NAME} 2>/dev/null || true
 fi
 
 # 创建 systemd 服务文件
