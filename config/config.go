@@ -111,7 +111,7 @@ func RemoveSubUrl(configPath, subUrl string) error {
 	var newLines []string
 	scanner := bufio.NewScanner(file)
 	inSubUrls := false
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmedLine := strings.TrimSpace(line)
