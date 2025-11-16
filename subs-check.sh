@@ -95,6 +95,7 @@ if [ ! -f "${BINARY_PATH}" ]; then
 fi
 
 # 检查配置文件是否存在
+CONFIG_DOWNLOADED=false
 if [ ! -f "${CONFIG_PATH}" ]; then
     echo -e "${YELLOW}未检测到配置文件，正在下载示例配置...${NC}"
     
@@ -117,8 +118,15 @@ if [ ! -f "${CONFIG_PATH}" ]; then
     fi
     
     echo -e "${GREEN}✓ 配置文件下载成功${NC}"
-    echo -e "${YELLOW}请编辑配置文件后再次运行此脚本: ${CONFIG_PATH}${NC}"
-    exit 0
+    CONFIG_DOWNLOADED=true
+fi
+
+# 如果刚下载了配置文件，提示用户但继续执行
+if [ "${CONFIG_DOWNLOADED}" = true ]; then
+    echo -e "${YELLOW}注意: 已使用默认配置文件，建议稍后编辑: ${CONFIG_PATH}${NC}"
+    echo -e "${YELLOW}继续使用默认配置启动服务...${NC}"
+    echo ""
+    sleep 2
 fi
 
 # 检查并设置可执行权限
