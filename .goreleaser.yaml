@@ -19,8 +19,7 @@ builds:
     binary: subs-check
 
 archives:
-  - id: default
-    format: tar.gz
+  - format: tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -28,6 +27,7 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     files:
       - none*
+    rlcp: true
 
 changelog:
   sort: asc
