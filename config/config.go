@@ -123,6 +123,7 @@ func RemoveSubUrl(configPath, subUrl string) error {
 			continue
 		}
 		
+		shouldSkip := false
 		if inSubUrls {
 			// 检测缩进
 			if len(line) > 0 && line[0] == ' ' {
@@ -131,10 +132,10 @@ func RemoveSubUrl(configPath, subUrl string) error {
 					if ch == '-' {
 						// 提取URL部分（去掉 "- " 和前后空格）
 						urlPart := strings.TrimSpace(line[i+1:])
-						// 如果这行包含要删除的URL，跳过这一行
+						// 如果这行包含要删除的URL，标记跳过这一行
 						if urlPart == subUrl {
 							slog.Info("从配置文件中删除失败的订阅链接", "url", subUrl)
-							continue
+							shouldSkip = true
 						}
 						break
 					}
@@ -145,7 +146,10 @@ func RemoveSubUrl(configPath, subUrl string) error {
 			}
 		}
 		
-		newLines = append(newLines, line)
+		// 只有不需要跳过的行才添加
+		if !shouldSkip {
+			newLines = append(newLines, line)
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
