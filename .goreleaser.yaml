@@ -21,12 +21,16 @@ builds:
     binary: subs-check
 
 archives:
-  - format: binary
+  - id: default
+    format: tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - none*
+    wrap_in_directory: false
 
 changelog:
   sort: asc
