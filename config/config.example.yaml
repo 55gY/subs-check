@@ -20,7 +20,7 @@ check-interval: 120
 success-limit: 0
 
 # 超时时间(毫秒)(节点的最大延迟)
-timeout: 5000
+timeout: 1000
 # 延迟测试URL
 # 一些高级用法需要自己摸索，比如想要拒绝某些CF类节点，可将url替换为https://www.cloudflare.com
 alive-test-url: http://gstatic.com/generate_204
@@ -180,7 +180,7 @@ sub-urls-timeout: 10
 remove-failed-sub: false
 # 获取订阅时使用的UA；如果设置random将会使用随机UA获取订阅
 # sub-urls-get-ua: "random"
-sub-urls-get-ua: "clash.meta (https://github.com/beck-8/subs-check)"
+sub-urls-get-ua: "clash.meta"
 # Github Proxy，获取订阅使用，结尾要带的 /
 # github-proxy: "https://ghfast.top/"
 github-proxy: ""
