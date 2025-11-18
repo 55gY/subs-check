@@ -20,7 +20,7 @@ CONFIG_PATH="${SCRIPT_DIR}/config/config.yaml"
 SERVICE_NAME="subs-check.service"
 SERVICE_PATH="/lib/systemd/system/${SERVICE_NAME}"
 GITHUB_REPO="55gY/subs-check"
-
+ 
 # 显示 Logo
 show_logo() {
     echo -e "${CYAN}"
