@@ -11,6 +11,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 # 配置变量
@@ -23,6 +24,7 @@ GITHUB_REPO="55gY/subs-check"
  
 # 显示 Logo
 show_logo() {
+    clear
     echo -e "${CYAN}"
     cat << "EOF"
  ____        _                ____ _               _    
@@ -38,47 +40,69 @@ EOF
     echo ""
 }
 
-# 显示帮助信息
-show_help() {
-    cat << EOF
-${GREEN}使用方法:${NC}
-    $(basename $0) [命令]
+# 显示主菜单
+show_menu() {
+    show_logo
+    
+    # 显示当前状态
+    echo -e "${CYAN}=== 当前状态 ===${NC}"
+    if [ -f "$BINARY_PATH" ]; then
+        echo -e "二进制文件: ${GREEN}已安装${NC}"
+    else
+        echo -e "二进制文件: ${RED}未安装${NC}"
+    fi
+    
+    if [ -f "$SERVICE_PATH" ]; then
+        if systemctl is-active --quiet "$SERVICE_NAME"; then
+            echo -e "服务状态:   ${GREEN}运行中 ✓${NC}"
+        else
+            echo -e "服务状态:   ${YELLOW}已停止${NC}"
+        fi
+        
+        if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+            echo -e "开机自启:   ${GREEN}已启用${NC}"
+        else
+            echo -e "开机自启:   ${YELLOW}未启用${NC}"
+        fi
+    else
+        echo -e "服务状态:   ${RED}未安装${NC}"
+    fi
+    
+    echo ""
+    echo -e "${CYAN}=== 主菜单 ===${NC}"
+    echo -e "${YELLOW}1.${NC}  安装 subs-check"
+    echo -e "${YELLOW}2.${NC}  升级到最新版本"
+    echo -e "${YELLOW}3.${NC}  卸载 subs-check"
+    echo ""
+    echo -e "${YELLOW}4.${NC}  启动服务"
+    echo -e "${YELLOW}5.${NC}  停止服务"
+    echo -e "${YELLOW}6.${NC}  重启服务"
+    echo -e "${YELLOW}7.${NC}  查看服务状态"
+    echo ""
+    echo -e "${YELLOW}8.${NC}  启用开机自启"
+    echo -e "${YELLOW}9.${NC}  禁用开机自启"
+    echo ""
+    echo -e "${YELLOW}10.${NC} 查看实时日志"
+    echo -e "${YELLOW}11.${NC} 查看完整日志"
+    echo ""
+    echo -e "${YELLOW}12.${NC} 编辑配置文件"
+    echo -e "${YELLOW}13.${NC} 测试配置语法"
+    echo ""
+    echo -e "${YELLOW}14.${NC} 实时监控服务"
+    echo -e "${YELLOW}15.${NC} 显示安装信息"
+    echo ""
+    echo -e "${YELLOW}16.${NC} 仅安装 systemd 服务"
+    echo -e "${YELLOW}17.${NC} 仅移除 systemd 服务"
+    echo ""
+    echo -e "${RED}0.${NC}  退出"
+    echo ""
+}
 
-${GREEN}可用命令:${NC}
-    ${YELLOW}install${NC}         安装 subs-check（下载二进制、配置文件、创建服务）
-    ${YELLOW}upgrade${NC}         升级到最新版本（保留配置文件）
-    ${YELLOW}uninstall${NC}       完全卸载（删除服务、二进制和配置文件）
-    
-    ${YELLOW}start${NC}           启动服务
-    ${YELLOW}stop${NC}            停止服务
-    ${YELLOW}restart${NC}         重启服务
-    ${YELLOW}status${NC}          查看服务状态
-    
-    ${YELLOW}enable${NC}          启用开机自启
-    ${YELLOW}disable${NC}         禁用开机自启
-    
-    ${YELLOW}logs${NC}            查看实时日志
-    ${YELLOW}logs-all${NC}        查看完整日志
-    
-    ${YELLOW}config${NC}          编辑配置文件
-    ${YELLOW}test${NC}            测试配置文件语法
-    
-    ${YELLOW}monitor${NC}         监控服务状态（实时刷新）
-    ${YELLOW}info${NC}            显示安装信息
-    
-    ${YELLOW}systemd-install${NC} 仅安装 systemd 服务
-    ${YELLOW}systemd-remove${NC}  仅移除 systemd 服务
-    
-    ${YELLOW}help${NC}            显示此帮助信息
-
-${GREEN}示例:${NC}
-    sudo $(basename $0) install      # 全新安装
-    sudo $(basename $0) upgrade      # 升级到最新版
-    sudo $(basename $0) status       # 查看服务状态
-    $(basename $0) logs              # 查看日志（无需 root）
-    sudo $(basename $0) uninstall    # 完全卸载
-
-EOF
+# 等待用户按键
+press_any_key() {
+    echo ""
+    echo -e "${CYAN}按任意键返回主菜单...${NC}"
+    read -n 1 -s
 }
 
 # 检查 root 权限（某些操作需要）
@@ -112,24 +136,31 @@ check_dependencies() {
     fi
 }
 
-# 获取最新版本下载链接
+# 获取最新版本下载链接（包括 Pre-release）
 get_latest_release_url() {
-    echo -e "${BLUE}正在获取最新版本信息...${NC}"
+    echo -e "${BLUE}正在获取最新版本信息...${NC}" >&2
     
     local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases"
     local download_url
     
+    # 获取所有 releases（包括 pre-release），取第一个包含 tar.gz 的下载链接
     if command -v curl &> /dev/null; then
-        download_url=$(curl -s "$api_url" | grep "browser_download_url.*tar.gz" | head -n 1 | cut -d '"' -f 4)
+        # 使用 curl 获取，并过滤出第一个 tar.gz 文件的下载链接
+        download_url=$(curl -s "$api_url" | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
     else
-        download_url=$(wget -qO- "$api_url" | grep "browser_download_url.*tar.gz" | head -n 1 | cut -d '"' -f 4)
+        # 使用 wget 获取
+        download_url=$(wget -qO- "$api_url" | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
     fi
     
     if [ -z "$download_url" ]; then
-        echo -e "${RED}错误: 无法获取下载链接${NC}"
-        echo "请手动访问: https://github.com/${GITHUB_REPO}/releases"
+        echo -e "${RED}错误: 无法获取下载链接${NC}" >&2
+        echo "请手动访问: https://github.com/${GITHUB_REPO}/releases" >&2
         exit 1
     fi
+    
+    # 显示即将下载的版本信息
+    local version=$(echo "$download_url" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+-[0-9]\+' || echo "未知版本")
+    echo -e "${GREEN}找到最新版本: ${version}${NC}" >&2
     
     echo "$download_url"
 }
@@ -265,7 +296,8 @@ cmd_install() {
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             echo -e "${BLUE}安装已取消${NC}"
-            exit 0
+            press_any_key
+            return
         fi
     fi
     
@@ -296,8 +328,7 @@ cmd_install() {
     
     echo ""
     echo -e "${GREEN}=== 安装完成 ===${NC}"
-    echo ""
-    cmd_info
+    press_any_key
 }
 
 # 升级
@@ -311,8 +342,9 @@ cmd_upgrade() {
     
     if [ ! -f "$BINARY_PATH" ]; then
         echo -e "${RED}错误: 未检测到已安装的版本${NC}"
-        echo -e "请先运行: ${YELLOW}sudo $(basename $0) install${NC}"
-        exit 1
+        echo -e "请先使用选项 1 进行安装${NC}"
+        press_any_key
+        return
     fi
     
     # 获取当前版本
@@ -350,7 +382,6 @@ cmd_upgrade() {
     
     echo ""
     echo -e "${GREEN}=== 升级完成 ===${NC}"
-    echo ""
     
     # 显示新版本
     if [ -x "$BINARY_PATH" ]; then
@@ -358,8 +389,7 @@ cmd_upgrade() {
         "$BINARY_PATH" --version 2>/dev/null || echo "无法获取版本信息"
     fi
     
-    echo ""
-    cmd_status
+    press_any_key
 }
 
 # 卸载
@@ -374,7 +404,8 @@ cmd_uninstall() {
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${BLUE}卸载已取消${NC}"
-        exit 0
+        press_any_key
+        return
     fi
     
     # 移除 systemd 服务
@@ -401,6 +432,7 @@ cmd_uninstall() {
     
     echo ""
     echo -e "${GREEN}=== 卸载完成 ===${NC}"
+    press_any_key
 }
 
 # 启动服务
@@ -416,6 +448,7 @@ cmd_start() {
         echo -e "${GREEN}服务已在运行中${NC}"
         cmd_status
     fi
+    press_any_key
 }
 
 # 停止服务
@@ -430,6 +463,7 @@ cmd_stop() {
     else
         echo -e "${YELLOW}服务未运行${NC}"
     fi
+    press_any_key
 }
 
 # 重启服务
@@ -440,6 +474,7 @@ cmd_restart() {
     systemctl restart "$SERVICE_NAME"
     sleep 2
     cmd_status
+    press_any_key
 }
 
 # 查看状态
@@ -465,6 +500,7 @@ cmd_enable() {
     echo -e "${YELLOW}启用开机自启...${NC}"
     systemctl enable "$SERVICE_NAME"
     echo -e "${GREEN}✓ 已设置开机自启${NC}"
+    press_any_key
 }
 
 # 禁用开机自启
@@ -474,6 +510,7 @@ cmd_disable() {
     echo -e "${YELLOW}禁用开机自启...${NC}"
     systemctl disable "$SERVICE_NAME"
     echo -e "${GREEN}✓ 已禁用开机自启${NC}"
+    press_any_key
 }
 
 # 查看日志
@@ -492,7 +529,8 @@ cmd_logs_all() {
 cmd_config() {
     if [ ! -f "$CONFIG_PATH" ]; then
         echo -e "${RED}错误: 配置文件不存在${NC}"
-        exit 1
+        press_any_key
+        return
     fi
     
     # 检测可用的编辑器
@@ -506,6 +544,7 @@ cmd_config() {
         echo -e "${YELLOW}未找到文本编辑器${NC}"
         echo -e "配置文件位置: ${CONFIG_PATH}"
         echo -e "请手动编辑该文件"
+        press_any_key
     fi
 }
 
@@ -513,7 +552,8 @@ cmd_config() {
 cmd_test() {
     if [ ! -f "$CONFIG_PATH" ]; then
         echo -e "${RED}错误: 配置文件不存在${NC}"
-        exit 1
+        press_any_key
+        return
     fi
     
     echo -e "${YELLOW}测试配置文件语法...${NC}"
@@ -525,13 +565,13 @@ cmd_test() {
             echo -e "${GREEN}✓ 配置文件语法正确${NC}"
         else
             echo -e "${RED}✗ 配置文件语法错误${NC}"
-            exit 1
         fi
     else
         echo -e "${YELLOW}无法验证语法（需要 python3）${NC}"
         echo -e "显示配置文件内容:"
         cat "$CONFIG_PATH"
     fi
+    press_any_key
 }
 
 # 监控服务状态
@@ -617,13 +657,7 @@ cmd_info() {
     echo -e "${CYAN}--- 访问地址 ---${NC}"
     echo -e "Web 管理: ${BLUE}http://localhost:8199/admin${NC}"
     echo -e "订阅链接: ${BLUE}http://localhost:8199/sub/all.yaml${NC}"
-    echo ""
-    
-    echo -e "${CYAN}--- 常用命令 ---${NC}"
-    echo -e "  查看状态: ${YELLOW}sudo $(basename $0) status${NC}"
-    echo -e "  查看日志: ${YELLOW}$(basename $0) logs${NC}"
-    echo -e "  重启服务: ${YELLOW}sudo $(basename $0) restart${NC}"
-    echo -e "  编辑配置: ${YELLOW}$(basename $0) config${NC}"
+    press_any_key
 }
 
 # 仅安装 systemd 服务
@@ -632,94 +666,126 @@ cmd_systemd_install() {
     
     if [ ! -f "$BINARY_PATH" ]; then
         echo -e "${RED}错误: 二进制文件不存在${NC}"
-        echo -e "请先运行: ${YELLOW}sudo $(basename $0) install${NC}"
-        exit 1
+        echo -e "请先使用选项 1 进行安装${NC}"
+        press_any_key
+        return
     fi
     
     create_systemd_service
     echo -e "${GREEN}✓ systemd 服务安装完成${NC}"
-    echo -e "启动服务: ${YELLOW}sudo $(basename $0) start${NC}"
+    echo -e "使用选项 4 启动服务${NC}"
+    press_any_key
 }
 
 # 仅移除 systemd 服务
 cmd_systemd_remove() {
     check_root
     remove_systemd_service
+    press_any_key
 }
 
 # 主函数
 main() {
-    # 如果没有参数，显示帮助
-    if [ $# -eq 0 ]; then
-        show_logo
-        show_help
+    # 如果有命令行参数，使用命令行模式（兼容性）
+    if [ $# -gt 0 ]; then
+        case "$1" in
+            install) cmd_install ;;
+            upgrade) cmd_upgrade ;;
+            uninstall) cmd_uninstall ;;
+            start) cmd_start ;;
+            stop) cmd_stop ;;
+            restart) cmd_restart ;;
+            status) cmd_status ;;
+            enable) cmd_enable ;;
+            disable) cmd_disable ;;
+            logs) cmd_logs ;;
+            logs-all) cmd_logs_all ;;
+            config) cmd_config ;;
+            test) cmd_test ;;
+            monitor) cmd_monitor ;;
+            info) cmd_info ;;
+            systemd-install) cmd_systemd_install ;;
+            systemd-remove) cmd_systemd_remove ;;
+            *)
+                echo -e "${RED}错误: 未知命令 '$1'${NC}"
+                exit 1
+                ;;
+        esac
         exit 0
     fi
     
-    # 解析命令
-    case "$1" in
-        install)
-            cmd_install
-            ;;
-        upgrade)
-            cmd_upgrade
-            ;;
-        uninstall)
-            cmd_uninstall
-            ;;
-        start)
-            cmd_start
-            ;;
-        stop)
-            cmd_stop
-            ;;
-        restart)
-            cmd_restart
-            ;;
-        status)
-            cmd_status
-            ;;
-        enable)
-            cmd_enable
-            ;;
-        disable)
-            cmd_disable
-            ;;
-        logs)
-            cmd_logs
-            ;;
-        logs-all)
-            cmd_logs_all
-            ;;
-        config)
-            cmd_config
-            ;;
-        test)
-            cmd_test
-            ;;
-        monitor)
-            cmd_monitor
-            ;;
-        info)
-            cmd_info
-            ;;
-        systemd-install)
-            cmd_systemd_install
-            ;;
-        systemd-remove)
-            cmd_systemd_remove
-            ;;
-        help|--help|-h)
-            show_logo
-            show_help
-            ;;
-        *)
-            echo -e "${RED}错误: 未知命令 '$1'${NC}"
-            echo ""
-            show_help
-            exit 1
-            ;;
-    esac
+    # 交互式菜单模式
+    while true; do
+        show_menu
+        
+        echo -ne "${GREEN}请选择操作 [0-17]: ${NC}"
+        read choice
+        
+        case $choice in
+            1)
+                cmd_install
+                ;;
+            2)
+                cmd_upgrade
+                ;;
+            3)
+                cmd_uninstall
+                ;;
+            4)
+                cmd_start
+                ;;
+            5)
+                cmd_stop
+                ;;
+            6)
+                cmd_restart
+                ;;
+            7)
+                cmd_status
+                press_any_key
+                ;;
+            8)
+                cmd_enable
+                ;;
+            9)
+                cmd_disable
+                ;;
+            10)
+                cmd_logs
+                ;;
+            11)
+                cmd_logs_all
+                ;;
+            12)
+                cmd_config
+                ;;
+            13)
+                cmd_test
+                ;;
+            14)
+                cmd_monitor
+                ;;
+            15)
+                cmd_info
+                ;;
+            16)
+                cmd_systemd_install
+                ;;
+            17)
+                cmd_systemd_remove
+                ;;
+            0)
+                show_logo
+                echo -e "${GREEN}感谢使用 subs-check 管理脚本！${NC}"
+                echo ""
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}无效的选择，请输入 0-17${NC}"
+                sleep 2
+                ;;
+        esac
+    done
 }
 
 # 运行主函数

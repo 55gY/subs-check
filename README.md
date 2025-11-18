@@ -4,6 +4,8 @@
   <strong>高性能订阅节点检测工具</strong>
 </p>
 
+> **致谢**: 本项目基于 [beck-8/subs-check](https://github.com/beck-8/subs-check) 进行开发和优化。感谢原作者 beck-8 的优秀工作！
+
 <p align="center">
   <a href="#主要特性">特性</a> •
   <a href="#快速开始">快速开始</a> •
