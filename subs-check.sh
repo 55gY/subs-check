@@ -198,6 +198,13 @@ RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
+# 内存监控和限制（可选，根据需要取消注释）
+# Environment="SUB_CHECK_MEM_MONITOR=1"
+# 软限制：限制最大内存使用，不会杀死进程，会主动GC
+# Environment="SUB_CHECK_MEM_SOFT_LIMIT=2GB"
+# 硬限制：超过限制后自动重启进程
+# Environment="SUB_CHECK_MEM_LIMIT=4GB"
+
 # 停止服务时的处理
 KillMode=mixed
 KillSignal=SIGTERM

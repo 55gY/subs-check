@@ -40,6 +40,12 @@ func (r *networkLimitedReader) Read(p []byte) (n int, err error) {
 }
 
 func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter *uint64) (int, int64, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Debug(fmt.Sprintf("CheckSpeed发生panic: %v", r))
+		}
+	}()
+	
 	// 注意：速度限制在网络层（statsConn）实现，大小限制在应用层基于网络字节计数器实现
 	// - 速度限制：通过 bucket 在 statsConn 中实现（网络层）
 	// - 大小限制：通过 networkLimitedReader 基于网络字节计数器实现（应用层，但限制网络流量）
@@ -70,7 +76,11 @@ func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter 
 		slog.Debug(fmt.Sprintf("测速请求失败: %v", err))
 		return 0, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+	}()
 
 	// 计算网络层的大小限制
 	var limitSize uint64

@@ -1,294 +1,774 @@
-# 🚀 订阅检测转换工具
+# Subs-Check
 
-> **✨ 修复逻辑、简化操作、增加功能、节省内存、一键启动无需配置**
+<p align="center">
+  <strong>高性能订阅节点检测工具</strong>
+</p>
 
-> **⚠️ 注意：** 功能更新频繁，请查看最新的[配置文件](https://github.com/beck-8/subs-check/blob/master/config/config.example.yaml)以获取最新功能。
+<p align="center">
+  <a href="#主要特性">特性</a> •
+  <a href="#快速开始">快速开始</a> •
+  <a href="#配置说明">配置</a> •
+  <a href="#使用方法">使用</a> •
+  <a href="#内存管理">内存管理</a> •
+  <a href="#常见问题">FAQ</a>
+</p>
 
-## 📸 预览
+---
 
+## 简介
 
-![preview](./doc/images/preview.png)  
-![result](./doc/images/results.png)  
-![admin](./doc/images/admin.png)
-| | |
-|---|---|
-| ![tgram](./doc/images/tgram.png) | ![dingtalk](./doc/images/dingtalk.png)  |
+Subs-Check 是一个轻量级、高性能的订阅节点检测工具，专为代理订阅管理而设计。支持批量检测节点可用性、测速、媒体解锁检测等功能，并提供 HTTP API 接口方便集成。
 
-## ✨ 功能特性
+## 主要特性
 
-- **🔗 订阅合并**
-- **🔍 节点可用性检测**
-- **🗑️ 节点去重**
-- **⏱️ 节点测速**
-- **🎬 流媒体平台解锁检测**
-- **✏️ 节点重命名**
-- **🔄 任意格式订阅转换**
-- **🔔 支持100+通知渠道**
-- **🌐 内置 Sub-Store**
-- **🖥️ WEB 控制面板**
-- **⏰ 支持 Crontab 表达式**
-- **🖥️ 多平台支持**
+### 🚀 核心功能
+- **批量节点检测** - 支持并发检测大量节点，可自定义并发数
+- **速度测试** - 内置测速功能，自动过滤慢速节点
+- **媒体解锁检测** - 支持 Netflix、Disney+、YouTube、OpenAI、Gemini、TikTok 等平台
+- **IP 风险评估** - 检测节点 IP 的风险等级
+- **智能重命名** - 根据 IP 归属地自动重命名节点
+- **去重优化** - 自动去除重复节点
 
-## 🛠️ 部署与使用 
-> 首次运行会在当前目录生成默认配置文件。
+### 🔄 自动化管理
+- **定时检测** - 支持 cron 表达式和固定间隔两种定时模式
+- **失败自动移除** - 自动删除获取失败的订阅链接（`remove-failed-sub`）
+- **热重载配置** - 配置文件修改后自动生效，无需重启
+- **订阅结果保存** - 支持本地文件、GitHub Gist、Cloudflare R2、MinIO、WebDAV 等多种存储方式
 
-### 🪜 代理设置（可选）
-<details>
-  <summary>展开查看</summary>
+### 🌐 Web 服务
+- **HTTP API** - 内置 Web 服务，提供订阅链接和管理接口
+- **Web 管理面板** - 可视化配置管理、实时状态监控、日志查看
+- **订阅管理 API** - 支持通过 API 动态添加/删除订阅链接
+- **Sub-Store 集成** - 支持嵌入式 Sub-Store 服务
 
-如果拉取非Github订阅速度慢，可使用通用的 HTTP_PROXY HTTPS_PROXY 环境变量加快速度；此变量不会影响节点测试速度
-```bash
-# HTTP 代理示例
-export HTTP_PROXY=http://username:password@192.168.1.1:7890
-export HTTPS_PROXY=http://username:password@192.168.1.1:7890
+### 💾 内存优化
+- **软内存限制** - 限制最大内存使用而不杀死进程
+- **智能 GC** - 定期垃圾回收，防止内存积压
+- **内存监控** - 实时监控内存使用情况
+- **Panic 恢复** - 全面的错误恢复机制，确保稳定运行
 
-# SOCKS5 代理示例
-export HTTP_PROXY=socks5://username:password@192.168.1.1:7890
-export HTTPS_PROXY=socks5://username:password@192.168.1.1:7890
+## 快速开始
 
-# SOCKS5H 代理示例
-export HTTP_PROXY=socks5h://username:password@192.168.1.1:7890
-export HTTPS_PROXY=socks5h://username:password@192.168.1.1:7890
-```
-如果想加速github的链接，可使用网上公开的github proxy，或者使用下方自建测速地址处的worker.js自建加速
-```
-# Github Proxy，获取订阅使用，结尾要带的 /
-# github-proxy: "https://ghfast.top/"
-github-proxy: "https://custom-domain/raw/"
-```
-
-</details>
-
-### 🌐 自建测速地址（可选）
-<details>
-  <summary>展开查看</summary>
-
-> **⚠️ 注意：** 避免使用 Speedtest 或 Cloudflare 下载链接，因为部分节点会屏蔽测速网站。
-
-1. 将 [worker.js](./doc/cloudflare/worker.js) 部署到 Cloudflare Workers。
-2. 绑定自定义域名（避免被节点屏蔽）。
-3. 在配置文件中设置 `speed-test-url` 为你的 Workers 地址：
-
-```yaml
-# 100MB
-speed-test-url: https://custom-domain/speedtest?bytes=104857600
-# 1GB
-speed-test-url: https://custom-domain/speedtest?bytes=1073741824
-```
-</details>
-
-### 🐳 Docker 运行
-
-> **⚠️ 注意：**  
-> - 限制内存请使用 `--memory="500m"`。  
-> - 可通过环境变量 `API_KEY` 设置 Web 控制面板的 API Key。
+### 方法一：一键安装（Ubuntu/Debian）
 
 ```bash
-# 基础运行
-docker run -d \
-  --name subs-check \
-  -p 8299:8299 \
-  -p 8199:8199 \
-  -v ./config:/app/config \
-  -v ./output:/app/output \
-  --restart always \
-  ghcr.io/beck-8/subs-check:latest
+# 下载安装脚本
+curl -O https://raw.githubusercontent.com/55gY/subs-check/master/subs-check.sh
+chmod +x subs-check.sh
 
-# 使用代理运行
-docker run -d \
-  --name subs-check \
-  -p 8299:8299 \
-  -p 8199:8199 \
-  -e HTTP_PROXY=http://192.168.1.1:7890 \
-  -e HTTPS_PROXY=http://192.168.1.1:7890 \
-  -v ./config:/app/config \
-  -v ./output:/app/output \
-  --restart always \
-  ghcr.io/beck-8/subs-check:latest
+# 以 root 权限运行（会自动下载二进制和配置文件）
+sudo bash subs-check.sh
 ```
 
-### 📜 Docker-Compose
+安装脚本会自动：
+- 从 GitHub Releases 下载最新版本
+- 下载默认配置文件
+- 创建 systemd 服务
+- 设置开机自启动
+
+### 方法二：手动安装
+
+#### 1. 下载预编译二进制文件
+
+从 [Releases](https://github.com/55gY/subs-check/releases) 页面下载适合您系统的版本：
+
+```bash
+# 下载并解压（替换为最新版本号）
+wget https://github.com/55gY/subs-check/releases/download/v0.0.0-xxx/subs-check-linux-amd64.tar.gz
+tar -xzf subs-check-linux-amd64.tar.gz
+cd subs-check
+```
+
+#### 2. 准备配置文件
+
+```bash
+# 创建配置目录
+mkdir -p config
+
+# 下载示例配置
+wget -O config/config.yaml https://raw.githubusercontent.com/55gY/subs-check/master/config/config.example.yaml
+
+# 编辑配置文件
+nano config/config.yaml
+```
+
+#### 3. 运行程序
+
+```bash
+# 直接运行
+./subs-check -f config/config.yaml
+
+# 或后台运行
+nohup ./subs-check -f config/config.yaml > subs-check.log 2>&1 &
+```
+
+### 方法三：从源码编译
+
+要求：Go 1.24.3+
+
+```bash
+# 克隆仓库
+git clone https://github.com/55gY/subs-check.git
+cd subs-check
+
+# 编译
+make build-linux-amd64
+
+# 运行
+./build/subs-check-linux-amd64 -f config/config.yaml
+```
+
+## 配置说明
+
+### 基础配置
 
 ```yaml
-version: "3"
+# 显示进度条
+print-progress: true
+
+# 并发线程数（根据CPU核心数和网络带宽调整）
+concurrent: 20
+
+# 定时检测间隔（分钟）
+check-interval: 120
+
+# 或使用 cron 表达式（优先级高于 check-interval）
+# cron-expression: "0 */2 * * *"  # 每2小时执行
+
+# 成功节点数量限制（0 表示不限制）
+success-limit: 0
+
+# 超时时间（毫秒）
+timeout: 1000
+
+# 延迟测试 URL
+alive-test-url: http://gstatic.com/generate_204
+```
+
+### 测速配置
+
+```yaml
+# 测速地址（建议使用稳定的大文件下载链接）
+speed-test-url: https://github.com/AaronFeng753/Waifu2x-Extension-GUI/releases/download/v2.21.12/Waifu2x-Extension-GUI-v2.21.12-Portable.7z
+
+# 最低速度要求（KB/s，低于此值的节点会被过滤）
+min-speed: 512
+
+# 测速超时时间（秒）
+download-timeout: 10
+
+# 单节点测速数据大小限制（MB，0 表示不限）
+download-mb: 20
+
+# 总下载速度限制（MB/s，0 表示不限）
+total-speed-limit: 0
+```
+
+### Web 服务配置
+
+```yaml
+# 监听端口
+listen-port: ":8199"
+
+# 启用 Web UI
+enable-web-ui: true
+
+# 子路径（如使用反向代理）
+web-ui-subpath: ""
+```
+
+访问方式：
+- 订阅链接：`http://your-ip:8199/sub/all.yaml`
+- 管理界面：`http://your-ip:8199/admin`
+
+### 节点命名配置
+
+```yaml
+# 启用智能重命名
+rename-node: true
+
+# 节点名称前缀
+node-prefix: ""
+```
+
+### 媒体解锁检测
+
+```yaml
+# 启用媒体检测
+media-check: true
+
+# 检测平台列表
+platforms:
+  - openai      # OpenAI API / ChatGPT
+  - youtube     # YouTube Premium
+  - netflix     # Netflix
+  - disney      # Disney+
+  - gemini      # Google Gemini
+  - tiktok      # TikTok
+  - iprisk      # IP 风险评估
+```
+
+### 订阅源配置
+
+```yaml
+# 订阅链接列表
+sub-urls:
+  - "https://example.com/sub1"
+  - "https://example.com/sub2"
+
+# 自动删除获取失败的订阅链接
+# 启用后，如果订阅链接连续获取失败，会自动从配置文件中删除
+# 注意：删除操作会保留配置文件的注释和格式
+remove-failed-sub: false
+
+# 保留上次成功的节点（在新检测结果前追加）
+keep-success-proxies: false
+```
+
+**`remove-failed-sub` 功能说明：**
+
+当启用此功能时，程序会自动监控订阅链接的获取状态：
+- ✅ 获取成功的订阅链接保持不变
+- ❌ 获取失败的订阅链接会被自动从配置文件中删除
+- 📝 删除时保留配置文件的格式和注释
+- 🔄 适合用于自动清理失效的订阅源
+
+**使用场景：**
+```yaml
+# 启用自动清理失效订阅
+remove-failed-sub: true
+
+sub-urls:
+  - "https://good-sub.com/link1"     # 正常订阅，保留
+  - "https://expired-sub.com/link2"  # 失效订阅，会被自动删除
+  - "https://good-sub.com/link3"     # 正常订阅，保留
+```
+
+### 结果保存配置
+
+支持多种保存方式：
+
+#### 1. 本地文件（默认）
+```yaml
+save-method: local
+save-path: "./output"
+```
+
+#### 2. GitHub Gist
+```yaml
+save-method: gist
+gist-token: "ghp_xxxxxxxxxxxxx"
+gist-id: "your-gist-id"
+```
+
+#### 3. Cloudflare R2
+```yaml
+save-method: cloudflare_r2
+r2-account-id: "your-account-id"
+r2-access-key-id: "your-access-key"
+r2-access-key-secret: "your-secret-key"
+r2-bucket-name: "your-bucket"
+```
+
+#### 4. MinIO / S3
+```yaml
+save-method: minio
+minio-endpoint: "minio.example.com:9000"
+minio-access-key: "minioadmin"
+minio-secret-key: "minioadmin"
+minio-bucket: "subs-check"
+minio-use-ssl: false
+```
+
+#### 5. WebDAV
+```yaml
+save-method: webdav
+webdav-url: "https://dav.example.com"
+webdav-username: "user"
+webdav-password: "pass"
+webdav-path: "/subs"
+```
+
+### 完整配置示例
+
+详见 [config/config.example.yaml](config/config.example.yaml)
+
+## 使用方法
+
+### 命令行参数
+
+```bash
+./subs-check -f config/config.yaml
+```
+
+参数说明：
+- `-f` - 指定配置文件路径（必需）
+
+### Systemd 服务管理
+
+如果使用 `subs-check.sh` 安装，服务会自动创建：
+
+```bash
+# 查看服务状态
+sudo systemctl status subs-check
+
+# 启动服务
+sudo systemctl start subs-check
+
+# 停止服务
+sudo systemctl stop subs-check
+
+# 重启服务
+sudo systemctl restart subs-check
+
+# 查看日志
+sudo journalctl -u subs-check -f
+
+# 禁用开机自启
+sudo systemctl disable subs-check
+```
+
+### HTTP API
+
+#### 获取订阅节点
+```bash
+# YAML 格式（Clash/mihomo）
+curl http://localhost:8199/sub/all.yaml
+
+# Base64 格式（通用订阅）
+curl http://localhost:8199/sub/all.txt
+
+# mihomo 配置格式
+curl http://localhost:8199/sub/mihomo.yaml
+```
+
+#### 管理 API
+
+所有管理 API 都需要在请求头中包含 API 密钥：
+
+```bash
+# 获取当前配置
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8199/api/config
+
+# 更新配置文件
+curl -X POST -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "your yaml config content"}' \
+  http://localhost:8199/api/config
+
+# 添加订阅链接（重要功能）
+curl -X POST -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"sub_url": "https://example.com/subscription"}' \
+  http://localhost:8199/api/config/add
+
+# 获取运行状态
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8199/api/status
+
+# 手动触发检测
+curl -X POST -H "X-API-Key: YOUR_API_KEY" \
+  http://localhost:8199/api/trigger-check
+
+# 强制停止当前检测
+curl -X POST -H "X-API-Key: YOUR_API_KEY" \
+  http://localhost:8199/api/force-close
+
+# 获取最近日志
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8199/api/logs
+
+# 获取版本信息
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8199/api/version
+```
+
+**API 密钥说明：**
+- 首次运行时会自动生成随机密钥
+- 可在配置文件中通过 `api-key` 字段自定义
+- 也可通过环境变量 `API_KEY` 设置
+- 密钥会在启动日志中显示
+
+#### 使用 Web 管理界面
+
+访问：`http://localhost:8199/admin`
+
+管理界面提供以下功能：
+- 📝 **可视化配置编辑** - 直接编辑 YAML 配置文件
+- ➕ **快速添加订阅** - 通过表单添加新的订阅链接（`addConfig` API）
+- 📊 **实时状态监控** - 查看检测进度、可用节点数等
+- 🔄 **手动触发检测** - 不等待定时，立即开始检测
+- 📋 **日志查看** - 查看最近的运行日志
+- 🔗 **订阅链接展示** - 复制当前服务器的订阅地址
+
+### Docker 运行
+
+```bash
+# 使用 Docker
+docker run -d \
+  --name subs-check \
+  -p 8199:8199 \
+  -v $(pwd)/config:/app/config \
+  -v $(pwd)/output:/app/output \
+  ghcr.io/55gy/subs-check:latest \
+  -f /app/config/config.yaml
+
+# 使用 Docker Compose
+version: '3'
 services:
   subs-check:
-    image: ghcr.io/beck-8/subs-check:latest
+    image: ghcr.io/55gy/subs-check:latest
     container_name: subs-check
+    ports:
+      - "8199:8199"
     volumes:
       - ./config:/app/config
       - ./output:/app/output
-    ports:
-      - "8299:8299"
-      - "8199:8199"
-    environment:
-      - TZ=Asia/Shanghai
-      # - HTTP_PROXY=http://192.168.1.1:7890
-      # - HTTPS_PROXY=http://192.168.1.1:7890
-      # - API_KEY=subs-check
-    restart: always
-    network_mode: bridge
+    command: -f /app/config/config.yaml
+    restart: unless-stopped
 ```
-### 📦 二进制文件运行
 
-下载 [Releases](https://github.com/beck-8/subs-check/releases) 中适合的版本，解压后直接运行即可。
+## 内存管理
 
-### 🖥️ 源码运行
+Subs-Check 提供了三种内存管理方式：
+
+### 1. 软内存限制（推荐）
+
+限制最大内存使用，但不会杀死进程：
 
 ```bash
-go run . -f ./config/config.yaml
+# 命令行方式
+export SUB_CHECK_MEM_SOFT_LIMIT=2GB
+./subs-check -f config/config.yaml
+
+# Systemd 服务方式
+# 编辑 /lib/systemd/system/subs-check.service
+[Service]
+Environment="SUB_CHECK_MEM_SOFT_LIMIT=2GB"
 ```
 
-## 🔔 通知渠道配置（可选）
-<details>
-  <summary>展开查看</summary>
+**工作原理：**
+- 使用 Go 运行时的 `debug.SetMemoryLimit()` API
+- 当内存使用接近限制时，自动增加 GC 频率
+- 不会中断服务，只是会更频繁地回收内存
 
-> **📦 支持 100+ 通知渠道**，通过 [Apprise](https://github.com/caronc/apprise) 发送通知。
+### 2. 硬内存限制
 
-### 🌐 Vercel 部署
-
-1. 点击[**此处**](https://vercel.com/new/clone?repository-url=https://github.com/beck-8/apprise_vercel)部署 Apprise。
-2. 部署后获取 API 链接，如 `https://testapprise-beck8s-projects.vercel.app/notify`。
-3. 建议为 Vercel 项目设置自定义域名（国内访问 Vercel 可能受限）。
-
-### 🐳 Docker 部署
-
-> **⚠️ 注意：** 不支持 arm/v7。
+超过限制后自动重启进程：
 
 ```bash
-# 基础运行
-docker run --name apprise -p 8000:8000 --restart always -d caronc/apprise:latest
-
-# 使用代理运行
-docker run --name apprise \
-  -p 8000:8000 \
-  -e HTTP_PROXY=http://192.168.1.1:7890 \
-  -e HTTPS_PROXY=http://192.168.1.1:7890 \
-  --restart always \
-  -d caronc/apprise:latest
+export SUB_CHECK_MEM_LIMIT=4GB
+./subs-check -f config/config.yaml
 ```
 
-### 📝 配置文件中配置通知
+适合作为兜底保护，防止内存泄露。
+
+### 3. 内存监控
+
+实时监控内存使用情况：
+
+```bash
+export SUB_CHECK_MEM_MONITOR=1
+./subs-check -f config/config.yaml
+```
+
+每 30 秒输出详细的内存统计信息。
+
+### 推荐配置
+
+在 systemd 服务中同时启用软限制和监控：
+
+```ini
+[Service]
+Environment="SUB_CHECK_MEM_SOFT_LIMIT=2GB"
+Environment="SUB_CHECK_MEM_LIMIT=3GB"
+Environment="SUB_CHECK_MEM_MONITOR=1"
+```
+
+## 高级功能
+
+### 动态订阅管理（addConfig API）
+
+通过 Web API 动态添加订阅链接，无需手动编辑配置文件：
+
+**API 端点：** `POST /api/config/add`
+
+**请求示例：**
+```bash
+curl -X POST http://localhost:8199/api/config/add \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"sub_url": "https://example.com/subscription"}'
+```
+
+**功能特点：**
+- ✅ 自动检测重复链接，避免重复添加
+- 📝 保留配置文件的原有格式和注释
+- 🔄 添加后自动触发配置热重载
+- 🎯 精确定位 `sub-urls` 部分并追加
+
+**响应示例：**
+```json
+{
+  "message": "订阅链接已添加",
+  "sub_url": "https://example.com/subscription"
+}
+```
+
+**使用场景：**
+1. **自动化订阅管理系统** - 通过脚本批量添加订阅
+2. **第三方集成** - 其他系统调用 API 动态添加订阅
+3. **Web 管理界面** - 用户友好的订阅管理
+
+**在 Web 管理界面中使用：**
+访问 `http://localhost:8199/admin`，在"添加订阅"表单中输入链接即可。
+
+### 自动清理失效订阅（remove-failed-sub）
+
+自动监控和清理无法访问的订阅链接：
+
+**配置方法：**
+```yaml
+# 在 config.yaml 中启用
+remove-failed-sub: true
+```
+
+**工作流程：**
+1. 程序尝试获取每个订阅链接
+2. 如果获取失败（网络错误、404等），记录失败的链接
+3. 检测完成后，自动从配置文件中删除失败的订阅
+4. 删除时保持配置文件的格式和注释不变
+
+**日志示例：**
+```
+WARN 订阅链接获取失败: https://expired.com/sub
+INFO 已从配置文件中删除失败的订阅: https://expired.com/sub
+```
+
+**适用场景：**
+- 🔄 **长期运行的服务** - 自动维护订阅列表，无需人工干预
+- 🧹 **订阅源管理** - 自动清理过期或失效的订阅
+- 📊 **订阅源质量监控** - 结合日志监控订阅的可用性
+
+**注意事项：**
+- 删除操作是永久性的，会修改配置文件
+- 建议在启用前备份配置文件
+- 如果订阅暂时无法访问（网络问题），也会被删除
+- 可以通过 API 或 Web 界面重新添加被删除的订阅
+
+### Sub-Store 服务
+
+启用嵌入式 Sub-Store 服务：
 
 ```yaml
-# 填写搭建的apprise API server 地址
-# https://notify.xxxx.us.kg/notify
-apprise-api-server: ""
-# 填写通知目标
-# 支持100+ 个通知渠道，详细格式请参照 https://github.com/caronc/apprise
-recipient-url: 
-  # telegram格式：tgram://{bot_token}/{chat_id}
-  # - tgram://xxxxxx/-1002149239223
-  # 钉钉格式：dingtalk://{Secret}@{ApiKey}
-  # - dingtalk://xxxxxx@xxxxxxx
-# 自定义通知标题
-notify-title: "🔔 节点状态更新"
+enable-substore: true
+substore-port: ":3000"
 ```
-</details>
 
-## 💾 保存方法配置
+访问：`http://localhost:3000`
 
-> **⚠️ 注意：** 选择保存方法时，请更改 `save-method` 配置。
+### 回调通知
 
-- **本地保存**：保存到 `./output` 文件夹。
-- **R2**：保存到 Cloudflare R2 [配置方法](./doc/r2.md)。
-- **Gist**：保存到 GitHub Gist [配置方法](./doc/gist.md)。
-- **WebDAV**：保存到 WebDAV 服务器 [配置方法](./doc/webdav.md)。
-- **S3**：保存到 S3 对象存储。
+支持在检测完成后发送通知：
 
-## 📲 订阅使用方法
+```yaml
+# Webhook 回调
+callback-url: "https://your-webhook.com/notify"
 
-> **💡 提示：** 内置 Sub-Store，可生成多种订阅格式；高级玩家可DIY很多功能
+# 企业微信通知
+wechat-webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+```
 
-**🚀 通用订阅**
+### 订阅成功率警告
+
+当订阅成功率低于阈值时发出警告：
+
+```yaml
+# 成功率阈值（0.0-1.0）
+success-rate: 0.3  # 低于 30% 时警告
+```
+
+## 常见问题
+
+### 1. 程序在测速 30% 时异常终止？
+
+**原因：** 可能是内存不足或某些节点触发了 panic
+
+**解决方案：**
+- 启用软内存限制：`export SUB_CHECK_MEM_SOFT_LIMIT=2GB`
+- 降低并发数：修改配置中的 `concurrent` 参数
+- 启用内存监控观察：`export SUB_CHECK_MEM_MONITOR=1`
+
+### 2. 节点检测速度太慢？
+
+**解决方案：**
+- 增加并发数（但注意内存和网络带宽）
+- 减少或禁用媒体检测功能
+- 使用更快的测速地址
+- 设置 `success-limit` 限制节点数量
+
+### 3. 某些订阅无法获取？
+
+**可能原因：**
+- 订阅链接失效
+- 网络问题
+- 订阅格式不支持
+
+**解决方案：**
+- 检查订阅链接是否有效
+- 启用 `remove-failed-sub: true` 自动清理失败的订阅
+- 查看日志获取详细错误信息：`journalctl -u subs-check -f`
+
+### 4. 如何通过 API 添加订阅链接？
+
+使用 `addConfig` API：
+
 ```bash
-# 通用订阅
-http://127.0.0.1:8299/download/sub
+# 单个添加
+curl -X POST http://localhost:8199/api/config/add \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"sub_url": "https://example.com/sub"}'
 
-# URI 订阅
-http://127.0.0.1:8299/download/sub?target=URI
-
-# Mihomo/ClashMeta
-http://127.0.0.1:8299/download/sub?target=ClashMeta
-
-# Clash
-http://127.0.0.1:8299/download/sub?target=Clash
-
-# V2Ray
-http://127.0.0.1:8299/download/sub?target=V2Ray
-
-# ShadowRocket
-http://127.0.0.1:8299/download/sub?target=ShadowRocket
-
-# Quantumult
-http://127.0.0.1:8299/download/sub?target=QX
-
-# Sing-Box
-http://127.0.0.1:8299/download/sub?target=sing-box
-
-# Surge
-http://127.0.0.1:8299/download/sub?target=Surge
-
-# Surfboard
-http://127.0.0.1:8299/download/sub?target=Surfboard
+# 批量添加（shell 脚本）
+for url in \
+  "https://sub1.com/link" \
+  "https://sub2.com/link" \
+  "https://sub3.com/link"
+do
+  curl -X POST http://localhost:8199/api/config/add \
+    -H "X-API-Key: YOUR_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"sub_url\": \"$url\"}"
+done
 ```
 
-**🚀 Mihomo/Clash 订阅（带规则）：**
-> 默认使用 `https://raw.githubusercontent.com/beck-8/override-hub/refs/heads/main/yaml/ACL4SSR_Online_Full.yaml` 覆写  
-可在配置中更改 `mihomo-overwrite-url`。
+### 5. remove-failed-sub 会误删正常订阅吗？
+
+**可能情况：**
+- 如果订阅服务器暂时无法访问（维护、网络波动），会被删除
+- 建议定期备份配置文件
+
+**减少误删的方法：**
+- 仅在稳定网络环境下启用
+- 通过日志监控删除情况
+- 使用 API 可以快速重新添加被删除的订阅
+
+### 6. API 密钥在哪里查看？
+
+**查看方式：**
 ```bash
-http://127.0.0.1:8299/api/file/mihomo
+# 查看服务日志
+sudo journalctl -u subs-check | grep "api-key"
+
+# 或在启动日志中查找
+# 输出类似：启用Web控制面板 api-key=123456
 ```
 
-## 🌐 内置端口说明
-> subs-check本身会在测试完后保存三个文件到output目录中；output目录中的所有文件会被8199端口提供文件服务
+**自定义密钥：**
+```yaml
+# 在 config.yaml 中设置
+api-key: "your-custom-key"
+```
 
-| 服务地址                        | 格式说明                | 来源说明|
-|-------------------------------|-------------------|----|
-| `http://127.0.0.1:8199/sub/all.yaml`   | Clash 格式节点 |由subs-check直接生成|
-| `http://127.0.0.1:8199/sub/mihomo.yaml`| 带分流规则的 Mihomo/Clash 订阅 |从上方sub-store转换下载后提供|
-| `http://127.0.0.1:8199/sub/base64.txt` | Base64 格式订阅 |从上方sub-store转换下载后提供|
+或使用环境变量：
+```bash
+export API_KEY="your-custom-key"
+./subs-check -f config/config.yaml
+```
 
-## 🗺️ 架构图
-<details>
-  <summary>展开查看</summary>
+### 7. Web 服务无法访问？
 
-```mermaid
-graph TD
-    A[订阅链接] -->|获取订阅链接| B[subs-check]
-    subgraph subs-check 处理流程
-        B -->|转成 YAML 格式| B1[节点去重]
-        B1 -->|去除冗余节点| B2[测活]
-        B2 -->|节点可用| B3[测速]
-        B2 -->|节点不可用| X[丢弃]
-        B3 -->|测速达标| B4[流媒体测试]
-        B3 -->|测速不达标| X[丢弃]
-        B4 -->|解锁检测| B5[生成 all.yaml]
-    end
-    B5 -->|保存到 output 目录| C[output 目录]
-    B5 -->|上传 all.yaml| D[sub-store]
-    C -->|保存到各位置| H1[R2/Gist/WebDAV/S3]
-    H1 -->|存储完成| H2[发送消息通知]
-    D -->|提供订阅转换服务| E[sub-store 转换服务]
-    subgraph sub-store 独立功能
-        E -->|生成配置文件| E1[mihomo.yaml, base64.txt]
-        E -->|其他格式转换| E2[Clash, V2Ray, ShadowRocket 等]
-        E -->|订阅分享| E3[分享订阅链接]
-    end
-    E1 -->|保存到 output 目录| C
-    C -->|文件服务| F[8199 端口: /sub]
-    B -->|Web 管理| G[8199 端口: /admin]
-``` 
+**检查事项：**
+- 端口是否被占用
+- 防火墙是否开放端口
+- 监听地址是否正确（`:8199` 表示监听所有接口）
 
-</details>
+### 8. 配置文件修改后不生效？
 
-## 🙏 鸣谢
-[cmliu](https://github.com/cmliu)、[Sub-Store](https://github.com/sub-store-org/Sub-Store)、[bestruirui](https://github.com/bestruirui/BestSub)、[iplark](https://iplark.com/)
+程序支持热重载，配置文件修改后会自动生效。如果没有生效：
+- 检查配置文件语法是否正确
+- 查看日志是否有错误提示
+- 某些配置项需要重启服务（如 `listen-port`）
 
-## ⭐ Star History
+### 9. 如何限制测速流量？
 
-[![Stargazers over time](https://starchart.cc/beck-8/subs-check.svg?variant=adaptive)](https://starchart.cc/beck-8/subs-check)
+使用 `total-speed-limit` 参数：
 
-## ⚖️ 免责声明
+```yaml
+# 限制总下载速度为 50MB/s
+total-speed-limit: 50
+```
 
-本工具仅供学习和研究使用，使用者应自行承担风险并遵守相关法律法规。
+### 10. 节点去重不起作用？
+
+去重基于节点的连接信息（服务器地址、端口、协议等）。如果节点名称不同但连接信息相同，会被识别为重复节点。
+
+## 性能建议
+
+### 并发数设置
+
+根据您的系统配置调整：
+
+- **低配置（1-2 核）**：`concurrent: 10-20`
+- **中等配置（4 核）**：`concurrent: 20-50`
+- **高配置（8+ 核）**：`concurrent: 50-100`
+
+### 内存限制
+
+建议配置：
+
+- **最小配置**：512MB（不启用测速和媒体检测）
+- **推荐配置**：2GB（启用所有功能）
+- **大规模订阅**：4GB+（1000+ 节点）
+
+### 测速优化
+
+- 使用稳定的测速地址
+- 设置合理的 `download-mb` 限制（建议 10-50MB）
+- 避免使用被墙的测速站点
+- 考虑自建测速服务器
+
+## 构建和开发
+
+### 编译所有平台
+
+```bash
+make build-all
+```
+
+### 只编译 Linux AMD64
+
+```bash
+make build-linux-amd64
+```
+
+### 清理构建文件
+
+```bash
+make clean
+```
+
+### 使用 GoReleaser
+
+```bash
+goreleaser release --snapshot --clean
+```
+
+## 许可证
+
+本项目采用 [LICENSE](LICENSE) 许可证。
+
+## 鸣谢
+
+- [Mihomo](https://github.com/MetaCubeX/mihomo) - 核心代理库
+- [Gin](https://github.com/gin-gonic/gin) - Web 框架
+- [Sub-Store](https://github.com/sub-store-org/Sub-Store) - 订阅管理服务
+
+## 支持
+
+- 问题反馈：[GitHub Issues](https://github.com/55gY/subs-check/issues)
+- 功能建议：[GitHub Discussions](https://github.com/55gY/subs-check/discussions)
+
+---
+
+<p align="center">
+  如果这个项目对你有帮助，请给个 ⭐️ Star 支持一下！
+</p>

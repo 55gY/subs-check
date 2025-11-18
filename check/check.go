@@ -126,6 +126,23 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, error) {
 	if config.GlobalConfig.PrintProgress {
 		go pc.showProgress(done)
 	}
+	
+	// 启动定期GC，防止内存积压
+	gcDone := make(chan bool)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-gcDone:
+				return
+			case <-ticker.C:
+				runtime.GC()
+				slog.Debug("定期GC触发")
+			}
+		}
+	}()
+	
 	var wg sync.WaitGroup
 	// 启动工作线程
 	for i := 0; i < pc.threadCount; i++ {
@@ -150,12 +167,21 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, error) {
 
 	// 等待结果收集完成
 	collectWg.Wait()
+	
+	// 停止定期GC
+	gcDone <- true
+	close(gcDone)
+	
 	// 等待进度条显示完成
 	time.Sleep(100 * time.Millisecond)
 
 	if config.GlobalConfig.PrintProgress {
 		done <- true
 	}
+
+	// 手动触发GC，释放大量临时对象占用的内存
+	runtime.GC()
+	slog.Debug("已触发GC释放内存")
 
 	if config.GlobalConfig.SuccessLimit > 0 && pc.available >= config.GlobalConfig.SuccessLimit {
 		slog.Warn(fmt.Sprintf("达到节点数量限制: %d", config.GlobalConfig.SuccessLimit))
@@ -172,10 +198,24 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, error) {
 // worker 处理单个代理检测的工作线程
 func (pc *ProxyChecker) worker(wg *sync.WaitGroup) {
 	defer wg.Done()
-	for proxy := range pc.tasks {
-		if result := pc.checkProxy(proxy); result != nil {
-			pc.resultChan <- *result
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error(fmt.Sprintf("worker发生panic: %v", r))
 		}
+	}()
+	
+	for proxy := range pc.tasks {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error(fmt.Sprintf("检测代理时发生panic: %v, proxy: %v", r, proxy["name"]))
+				}
+			}()
+			
+			if result := pc.checkProxy(proxy); result != nil {
+				pc.resultChan <- *result
+			}
+		}()
 		pc.incrementProgress()
 	}
 }
@@ -389,6 +429,12 @@ func (pc *ProxyChecker) incrementAvailable() {
 
 // distributeProxies 分发代理任务
 func (pc *ProxyChecker) distributeProxies(proxies []map[string]any) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error(fmt.Sprintf("distributeProxies发生panic: %v", r))
+		}
+	}()
+	
 	for _, proxy := range proxies {
 		if config.GlobalConfig.SuccessLimit > 0 && atomic.LoadInt32(&pc.available) >= config.GlobalConfig.SuccessLimit {
 			break
@@ -399,16 +445,28 @@ func (pc *ProxyChecker) distributeProxies(proxies []map[string]any) {
 		}
 		pc.tasks <- proxy
 	}
-	// // 发送任务结束，进行一次内存回收
-	// for i := range proxies {
-	// 	proxies[i] = nil // 移除 map 引用
-	// }
-	// proxies = nil // 移除切片引用
 	close(pc.tasks)
+	
+	// 发送任务结束，进行一次内存回收
+	go func() {
+		// 延迟清理，避免影响正在处理的任务
+		time.Sleep(1 * time.Second)
+		for i := range proxies {
+			proxies[i] = nil // 移除 map 引用
+		}
+		proxies = nil // 移除切片引用
+		slog.Debug("已清理proxies切片内存")
+	}()
 }
 
 // collectResults 收集检测结果
 func (pc *ProxyChecker) collectResults() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error(fmt.Sprintf("collectResults发生panic: %v", r))
+		}
+	}()
+	
 	for result := range pc.resultChan {
 		pc.results = append(pc.results, result)
 	}
@@ -493,6 +551,12 @@ type ProxyClient struct {
 }
 
 func CreateClient(mapping map[string]any) *ProxyClient {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Debug(fmt.Sprintf("CreateClient发生panic: %v, proxy: %v", r, mapping["name"]))
+		}
+	}()
+	
 	proxy, err := adapter.ParseProxy(mapping)
 	if err != nil {
 		slog.Debug(fmt.Sprintf("底层mihomo创建代理Client失败: %v", err))
@@ -539,6 +603,12 @@ func CreateClient(mapping map[string]any) *ProxyClient {
 // Close closes the proxy client and cleans up resources
 // 防止底层库有一些泄露，所以这里手动关闭
 func (pc *ProxyClient) Close() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Debug(fmt.Sprintf("Close发生panic: %v", r))
+		}
+	}()
+	
 	if pc.Client != nil {
 		pc.Client.CloseIdleConnections()
 	}
