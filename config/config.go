@@ -70,17 +70,19 @@ type Config struct {
 	Proxy                string   `yaml:"proxy"`
 	CallbackScript       string   `yaml:"callback-script"`
 	RemoveFailedSub      bool     `yaml:"remove-failed-sub"`
+	RemoveFailedSubRetry int      `yaml:"remove-failed-sub-retry"`
 }
 
 var GlobalConfig = &Config{
 	// 新增配置，给未更改配置文件的用户一个默认值
-	ListenPort:         ":8199",
-	NotifyTitle:        "🔔 节点状态更新",
-	MihomoOverwriteUrl: "http://127.0.0.1:8199/sub/ACL4SSR_Online_Full.yaml",
-	Platforms:          []string{"openai", "youtube", "netflix", "disney", "gemini", "iprisk"},
-	DownloadMB:         20,
-	AliveTestUrl:       "http://gstatic.com/generate_204",
-	SubUrlsGetUA:       "clash.meta (https://github.com/beck-8/subs-check)",
+	ListenPort:           ":8199",
+	NotifyTitle:          "🔔 节点状态更新",
+	MihomoOverwriteUrl:   "http://127.0.0.1:8199/sub/ACL4SSR_Online_Full.yaml",
+	Platforms:            []string{"openai", "youtube", "netflix", "disney", "gemini", "iprisk"},
+	DownloadMB:           20,
+	AliveTestUrl:         "http://gstatic.com/generate_204",
+	SubUrlsGetUA:         "clash.meta (https://github.com/beck-8/subs-check)",
+	RemoveFailedSubRetry: 3, // 默认失败3次后删除
 }
 
 //go:embed config.example.yaml
@@ -163,4 +165,126 @@ func RemoveSubUrl(configPath, subUrl string) error {
 	}
 
 	return nil
+}
+
+// FailureRecord 失败记录结构
+type FailureRecord struct {
+	URL     string
+	Count   int
+	Updated string
+}
+
+// GetFailureRecordPath 获取失败记录文件路径
+func GetFailureRecordPath() string {
+	return "sub_failure_record.txt"
+}
+
+// ReadFailureRecord 读取失败记录
+func ReadFailureRecord() (map[string]int, error) {
+	records := make(map[string]int)
+	filePath := GetFailureRecordPath()
+	
+	file, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return records, nil // 文件不存在时返回空记录
+		}
+		return records, err
+	}
+	defer file.Close()
+	
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		
+		parts := strings.Split(line, "|")
+		if len(parts) >= 2 {
+			url := strings.TrimSpace(parts[0])
+			var count int
+			if _, err := fmt.Sscanf(parts[1], "%d", &count); err == nil {
+				records[url] = count
+			}
+		}
+	}
+	
+	return records, scanner.Err()
+}
+
+// WriteFailureRecord 写入失败记录
+func WriteFailureRecord(records map[string]int) error {
+	filePath := GetFailureRecordPath()
+	
+	file, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	
+	// 写入文件头注释
+	fmt.Fprintln(file, "# 订阅链接失败记录")
+	fmt.Fprintln(file, "# 格式: URL|失败次数|最后更新时间")
+	fmt.Fprintln(file, "# 当失败次数达到配置的重试次数时，该订阅链接将被自动删除")
+	fmt.Fprintln(file, "")
+	
+	// 写入记录
+	for url, count := range records {
+		fmt.Fprintf(file, "%s|%d|%s\n", url, count, "")
+	}
+	
+	return nil
+}
+
+// IncrementFailureCount 增加失败次数
+func IncrementFailureCount(subUrl string) (int, error) {
+	records, err := ReadFailureRecord()
+	if err != nil {
+		return 0, err
+	}
+	
+	// 增加失败次数
+	records[subUrl]++
+	currentCount := records[subUrl]
+	
+	// 保存更新后的记录
+	err = WriteFailureRecord(records)
+	if err != nil {
+		return currentCount, err
+	}
+	
+	slog.Info("记录订阅链接失败", "url", subUrl, "失败次数", currentCount, "删除阈值", GlobalConfig.RemoveFailedSubRetry)
+	
+	return currentCount, nil
+}
+
+// ResetFailureCount 重置失败次数（成功获取时调用）
+func ResetFailureCount(subUrl string) error {
+	records, err := ReadFailureRecord()
+	if err != nil {
+		return err
+	}
+	
+	// 如果该URL存在失败记录，删除它
+	if _, exists := records[subUrl]; exists {
+		delete(records, subUrl)
+		slog.Info("重置订阅链接失败计数", "url", subUrl)
+		return WriteFailureRecord(records)
+	}
+	
+	return nil
+}
+
+// ShouldRemoveFailedSub 检查是否应该删除失败的订阅
+func ShouldRemoveFailedSub(subUrl string, failureCount int) bool {
+	if !GlobalConfig.RemoveFailedSub {
+		return false
+	}
+	
+	if GlobalConfig.RemoveFailedSubRetry <= 0 {
+		return true // 如果设置为0或负数，第一次失败就删除
+	}
+	
+	return failureCount >= GlobalConfig.RemoveFailedSubRetry
 }

@@ -33,7 +33,7 @@ Subs-Check 是一个轻量级、高性能的订阅节点检测工具，专为代
 
 ### 🔄 自动化管理
 - **定时检测** - 支持 cron 表达式和固定间隔两种定时模式
-- **失败自动移除** - 自动删除获取失败的订阅链接（`remove-failed-sub`）
+- **智能失败处理** - 记录订阅获取失败次数，达到配置的重试次数后才自动删除（`remove-failed-sub` + `remove-failed-sub-retry`）
 - **热重载配置** - 配置文件修改后自动生效，无需重启
 - **订阅结果保存** - 支持本地文件、GitHub Gist、Cloudflare R2、MinIO、WebDAV 等多种存储方式
 
@@ -223,27 +223,46 @@ sub-urls:
 # 注意：删除操作会保留配置文件的注释和格式
 remove-failed-sub: false
 
+# 订阅链接失败重试次数
+# 当订阅链接获取失败时，会记录失败次数，达到此次数后才会删除该订阅链接
+# 这样可以避免因为网络临时波动导致的误删除
+# 设置为0表示失败1次就删除，设置为负数表示永不删除
+remove-failed-sub-retry: 3
+
 # 保留上次成功的节点（在新检测结果前追加）
 keep-success-proxies: false
 ```
 
-**`remove-failed-sub` 功能说明：**
+**智能失败处理功能说明：**
 
-当启用此功能时，程序会自动监控订阅链接的获取状态：
-- ✅ 获取成功的订阅链接保持不变
-- ❌ 获取失败的订阅链接会被自动从配置文件中删除
-- 📝 删除时保留配置文件的格式和注释
-- 🔄 适合用于自动清理失效的订阅源
+程序提供了两级保护机制来避免误删除订阅：
 
-**使用场景：**
+1. **失败计数机制** (`remove-failed-sub-retry`)：
+   - 记录每个订阅链接的失败次数
+   - 只有达到配置的重试次数后才会删除
+   - 成功获取后会重置失败计数
+
+2. **失败记录文件** (`sub_failure_record.txt`)：
+   - 自动生成失败记录文件
+   - 记录每个订阅的失败次数和时间
+   - 可以手动查看和编辑
+
+**工作流程：**
+- ✅ 订阅获取成功 → 重置失败计数，保留订阅
+- ❌ 订阅获取失败 → 失败次数 +1
+- � 失败次数 < 重试次数 → 保留订阅，下次继续重试
+- �️ 失败次数 ≥ 重试次数 → 删除订阅
+
+**配置示例：**
 ```yaml
-# 启用自动清理失效订阅
+# 启用智能失败处理
 remove-failed-sub: true
+remove-failed-sub-retry: 3  # 失败3次后才删除
 
 sub-urls:
   - "https://good-sub.com/link1"     # 正常订阅，保留
-  - "https://expired-sub.com/link2"  # 失效订阅，会被自动删除
-  - "https://good-sub.com/link3"     # 正常订阅，保留
+  - "https://unstable-sub.com/link2" # 偶尔失败，保留并重试
+  - "https://dead-sub.com/link3"     # 连续3次失败后删除
 ```
 
 ### 结果保存配置
@@ -522,25 +541,54 @@ curl -X POST http://localhost:8199/api/config/add \
 **在 Web 管理界面中使用：**
 访问 `http://localhost:8199/admin`，在"添加订阅"表单中输入链接即可。
 
-### 自动清理失效订阅（remove-failed-sub）
+### 智能订阅失败处理（remove-failed-sub）
 
-自动监控和清理无法访问的订阅链接：
+自动监控和智能处理无法访问的订阅链接，避免因临时网络问题误删除：
 
 **配置方法：**
 ```yaml
 # 在 config.yaml 中启用
 remove-failed-sub: true
+remove-failed-sub-retry: 3  # 失败3次后才删除
 ```
 
-**工作流程：**
-1. 程序尝试获取每个订阅链接
-2. 如果获取失败（网络错误、404等），记录失败的链接
-3. 检测完成后，自动从配置文件中删除失败的订阅
-4. 删除时保持配置文件的格式和注释不变
+**工作机制：**
+
+1. **失败计数跟踪**：
+   - 程序会自动生成 `sub_failure_record.txt` 文件
+   - 记录每个订阅链接的失败次数和时间
+   - 获取成功时会自动重置计数
+
+2. **智能删除策略**：
+   - 只有连续失败次数达到 `remove-failed-sub-retry` 配置值才删除
+   - 避免因网络波动、DNS 解析问题等临时故障导致的误删
+   - 保留配置文件格式和注释
+
+3. **失败记录文件示例**：
+   ```
+   # 订阅链接失败记录
+   # 格式: URL|失败次数|最后更新时间
+   
+   https://expired-sub.com/link1|3|
+   https://unstable-sub.com/link2|1|
+   ```
+
+**适用场景：**
+- 🔄 **订阅源清理** - 自动移除长期失效的订阅
+- 🛡️ **误删保护** - 网络临时问题不会立即删除订阅
+- 📊 **维护监控** - 通过失败记录了解订阅源健康状况
+
+**最佳实践：**
+```yaml
+# 推荐配置
+remove-failed-sub: true
+remove-failed-sub-retry: 5  # 较高的重试次数，避免误删
+```
 
 **日志示例：**
 ```
-WARN 订阅链接获取失败: https://expired.com/sub
+WARN 获取订阅链接错误跳过: https://expired.com/sub
+INFO 记录订阅链接失败 url=https://expired.com/sub 失败次数=3 删除阈值=3
 INFO 已从配置文件中删除失败的订阅: https://expired.com/sub
 ```
 
@@ -615,7 +663,8 @@ success-rate: 0.3  # 低于 30% 时警告
 
 **解决方案：**
 - 检查订阅链接是否有效
-- 启用 `remove-failed-sub: true` 自动清理失败的订阅
+- 启用智能失败处理：`remove-failed-sub: true` 和 `remove-failed-sub-retry: 3`
+- 查看失败记录文件：`cat sub_failure_record.txt`
 - 查看日志获取详细错误信息：`journalctl -u subs-check -f`
 
 ### 4. 如何通过 API 添加订阅链接？
@@ -642,16 +691,27 @@ do
 done
 ```
 
-### 5. remove-failed-sub 会误删正常订阅吗？
+### 5. 智能失败处理如何避免误删订阅？
 
-**可能情况：**
-- 如果订阅服务器暂时无法访问（维护、网络波动），会被删除
-- 建议定期备份配置文件
+**保护机制：**
+- **失败计数** - 只有连续失败多次（默认3次）才删除
+- **失败记录** - 自动生成 `sub_failure_record.txt` 记录失败历史
+- **重置机制** - 订阅获取成功后自动重置失败计数
 
-**减少误删的方法：**
-- 仅在稳定网络环境下启用
-- 通过日志监控删除情况
-- 使用 API 可以快速重新添加被删除的订阅
+**配置推荐：**
+```yaml
+remove-failed-sub: true
+remove-failed-sub-retry: 5  # 失败5次后才删除，减少误删
+```
+
+**监控失败状态：**
+```bash
+# 查看失败记录
+cat sub_failure_record.txt
+
+# 监控日志
+tail -f /var/log/subs-check.log | grep "失败次数"
+```
 
 ### 6. API 密钥在哪里查看？
 

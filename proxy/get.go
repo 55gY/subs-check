@@ -21,7 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func GetProxies() ([]map[string]any, error) {
+func GetProxies() ([]map[string]any, []string, []string, error) {
 
 	// 解析本地与远程订阅清单
 	subUrls, localNum, remoteNum := resolveSubUrls()
@@ -35,6 +35,7 @@ func GetProxies() ([]map[string]any, error) {
 	proxyChan := make(chan map[string]any, 1)                              // 缓冲通道存储解析的代理
 	concurrentLimit := make(chan struct{}, config.GlobalConfig.Concurrent) // 限制并发数
 	failedSubsChan := make(chan string, len(subUrls))                      // 收集失败的订阅链接
+	successSubsChan := make(chan string, len(subUrls))                     // 收集成功的订阅链接
 
 	// 启动收集结果的协程
 	var mihomoProxies []map[string]any
@@ -64,6 +65,9 @@ func GetProxies() ([]map[string]any, error) {
 				}
 				return
 			}
+
+			// 获取成功，记录到成功列表
+			successSubsChan <- url
 
 			var tag string
 			if d, err := u.Parse(url); err == nil {
@@ -136,26 +140,21 @@ func GetProxies() ([]map[string]any, error) {
 	wg.Wait()
 	close(proxyChan)
 	close(failedSubsChan)
+	close(successSubsChan)
 	<-done // 等待收集完成
 
-	// 处理失败的订阅链接（如果启用了自动删除）
-	if config.GlobalConfig.RemoveFailedSub {
-		failedSubs := make([]string, 0)
-		for failedUrl := range failedSubsChan {
-			failedSubs = append(failedSubs, failedUrl)
-		}
-		
-		if len(failedSubs) > 0 {
-			slog.Warn(fmt.Sprintf("检测到 %d 个失败的订阅链接，将从配置文件中删除", len(failedSubs)))
-			for _, failedUrl := range failedSubs {
-				if err := config.RemoveSubUrlFromConfig(failedUrl); err != nil {
-					slog.Error(fmt.Sprintf("删除失败的订阅链接时出错: %v", err), "url", failedUrl)
-				}
-			}
-		}
+	// 收集失败和成功的订阅链接
+	failedSubs := make([]string, 0)
+	for failedUrl := range failedSubsChan {
+		failedSubs = append(failedSubs, failedUrl)
+	}
+	
+	successSubs := make([]string, 0)
+	for successUrl := range successSubsChan {
+		successSubs = append(successSubs, successUrl)
 	}
 
-	return mihomoProxies, nil
+	return mihomoProxies, failedSubs, successSubs, nil
 }
 
 // from 3k
