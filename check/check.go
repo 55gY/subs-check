@@ -343,7 +343,20 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 		}
 	}
 
-	name := res.Proxy["name"].(string)
+	// 安全地获取 name 字段，支持 string 和 int 类型
+	var name string
+	switch v := res.Proxy["name"].(type) {
+	case string:
+		name = v
+	case int:
+		name = fmt.Sprintf("%d", v)
+	case int64:
+		name = fmt.Sprintf("%d", v)
+	case float64:
+		name = fmt.Sprintf("%.0f", v)
+	default:
+		name = fmt.Sprintf("%v", v)
+	}
 	name = strings.TrimSpace(name)
 
 	var tags []string
