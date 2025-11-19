@@ -59,10 +59,8 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 			data, err := GetDateFromSubs(url)
 			if err != nil {
 				slog.Error(fmt.Sprintf("获取订阅链接错误跳过: %v", err))
-				// 如果启用了自动删除失败的订阅，将URL添加到失败列表
-				if config.GlobalConfig.RemoveFailedSub {
-					failedSubsChan <- url
-				}
+				// 记录失败的订阅链接
+				failedSubsChan <- url
 				return
 			}
 

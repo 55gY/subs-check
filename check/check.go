@@ -103,28 +103,26 @@ func Check() ([]Result, error) {
 	slog.Info(fmt.Sprintf("获取节点数量: %d", len(proxies)))
 
 	// 处理跨检测周期的失败计数和删除逻辑
-	if config.GlobalConfig.RemoveFailedSub {
-		// 重置成功获取的订阅的失败计数
-		for _, successUrl := range successSubs {
-			if err := config.ResetFailureCount(successUrl); err != nil {
-				slog.Error("重置失败计数失败", "error", err, "url", successUrl)
-			}
+	// 重置成功获取的订阅的失败计数
+	for _, successUrl := range successSubs {
+		if err := config.ResetFailureCount(successUrl); err != nil {
+			slog.Error("重置失败计数失败", "error", err, "url", successUrl)
+		}
+	}
+	
+	// 增加失败订阅的计数，并检查是否应该删除
+	for _, failedUrl := range failedSubs {
+		failureCount, countErr := config.IncrementFailureCount(failedUrl)
+		if countErr != nil {
+			slog.Error("记录失败次数失败", "error", countErr, "url", failedUrl)
+			continue
 		}
 		
-		// 增加失败订阅的计数，并检查是否应该删除
-		for _, failedUrl := range failedSubs {
-			failureCount, countErr := config.IncrementFailureCount(failedUrl)
-			if countErr != nil {
-				slog.Error("记录失败次数失败", "error", countErr, "url", failedUrl)
-				continue
-			}
-			
-			// 检查是否应该删除该订阅
-			if config.ShouldRemoveFailedSub(failedUrl, failureCount) {
-				slog.Warn(fmt.Sprintf("订阅链接失败次数达到限制，将从配置文件中删除"), "url", failedUrl, "失败次数", failureCount)
-				if err := config.RemoveSubUrlFromConfig(failedUrl); err != nil {
-					slog.Error(fmt.Sprintf("删除失败的订阅链接时出错: %v", err), "url", failedUrl)
-				}
+		// 检查是否应该删除该订阅
+		if config.ShouldRemoveFailedSub(failedUrl, failureCount) {
+			slog.Warn(fmt.Sprintf("订阅链接失败次数达到限制，将从配置文件中删除"), "url", failedUrl, "失败次数", failureCount, "配置值", config.GlobalConfig.RemoveFailedSubRetry)
+			if err := config.RemoveSubUrlFromConfig(failedUrl); err != nil {
+				slog.Error(fmt.Sprintf("删除失败的订阅链接时出错: %v", err), "url", failedUrl)
 			}
 		}
 	}

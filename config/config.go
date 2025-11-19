@@ -69,7 +69,6 @@ type Config struct {
 	GithubProxy          string   `yaml:"github-proxy"`
 	Proxy                string   `yaml:"proxy"`
 	CallbackScript       string   `yaml:"callback-script"`
-	RemoveFailedSub      bool     `yaml:"remove-failed-sub"`
 	RemoveFailedSubRetry int      `yaml:"remove-failed-sub-retry"`
 }
 
@@ -82,7 +81,7 @@ var GlobalConfig = &Config{
 	DownloadMB:           20,
 	AliveTestUrl:         "http://gstatic.com/generate_204",
 	SubUrlsGetUA:         "clash.meta (https://github.com/beck-8/subs-check)",
-	RemoveFailedSubRetry: 3, // 默认失败3次后删除
+	RemoveFailedSubRetry: -1, // 默认永不删除，避免误删用户订阅
 }
 
 //go:embed config.example.yaml
@@ -278,13 +277,18 @@ func ResetFailureCount(subUrl string) error {
 
 // ShouldRemoveFailedSub 检查是否应该删除失败的订阅
 func ShouldRemoveFailedSub(subUrl string, failureCount int) bool {
-	if !GlobalConfig.RemoveFailedSub {
+	retryConfig := GlobalConfig.RemoveFailedSubRetry
+	
+	// < 0: 永不删除
+	if retryConfig < 0 {
 		return false
 	}
 	
-	if GlobalConfig.RemoveFailedSubRetry <= 0 {
-		return true // 如果设置为0或负数，第一次失败就删除
+	// = 0: 失败1次就删除
+	if retryConfig == 0 {
+		return failureCount >= 1
 	}
 	
-	return failureCount >= GlobalConfig.RemoveFailedSubRetry
+	// > 0: 失败N次后删除
+	return failureCount >= retryConfig
 }

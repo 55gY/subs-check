@@ -174,15 +174,13 @@ sub-urls-retry: 3
 sub-urls-retry-interval: 1
 # 订阅链接超时时间(秒)
 sub-urls-timeout: 10
-# 自动删除获取失败的订阅链接
-# 如果设置为true，当订阅链接获取失败时，会自动从配置文件的sub-urls中删除该链接
-# 注意：删除操作会保留配置文件中的注释和格式
-remove-failed-sub: false
 # 订阅链接失败重试次数
-# 当订阅链接获取失败时，会记录失败次数，达到此次数后才会删除该订阅链接
-# 这样可以避免因为网络临时波动导致的误删除
-# 设置为0表示失败1次就删除，设置为负数表示永不删除
-remove-failed-sub-retry: 3
+# 控制订阅链接获取失败后的处理策略：
+# > 0: 启用智能重试机制，失败N次后才删除订阅链接（推荐：3-5）
+# = 0: 失败1次就立即删除订阅链接
+# < 0: 永不删除失败的订阅链接（默认：-1）
+# 注意：删除操作会保留配置文件中的注释和格式
+remove-failed-sub-retry: -1
 # 获取订阅时使用的UA；如果设置random将会使用随机UA获取订阅
 # sub-urls-get-ua: "random"
 sub-urls-get-ua: "clash.meta"
