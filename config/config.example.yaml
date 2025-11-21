@@ -202,7 +202,7 @@ success-rate: 0
 sub-urls-remote:
   # - https://example.com/sub-list.txt
   # - https://example.com/sub-list.yaml
-  # - https://raw.githubusercontent.com/beck-8/sub-urls/main/%E5%B0%8F%E8%80%8C%E7%BE%8E.txt
+  # - https://raw.githubusercontent.com/55gY/sub-urls/main/%E5%B0%8F%E8%80%8C%E7%BE%8E.txt
 
 # 订阅地址 支持 clash/mihomo/v2ray/base64 格式的订阅链接
 # 如果用户想明确使用clash类型，那可以在支持的订阅链接结尾加上 &flag=clash.meta

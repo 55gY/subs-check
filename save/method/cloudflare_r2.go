@@ -10,7 +10,7 @@ import (
 
 	"log/slog"
 
-	"github.com/beck-8/subs-check/config"
+	"github.com/55gY/subs-check/config"
 )
 
 const (

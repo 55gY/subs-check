@@ -80,7 +80,7 @@ var GlobalConfig = &Config{
 	Platforms:            []string{"openai", "youtube", "netflix", "disney", "gemini", "iprisk"},
 	DownloadMB:           20,
 	AliveTestUrl:         "http://gstatic.com/generate_204",
-	SubUrlsGetUA:         "clash.meta (https://github.com/beck-8/subs-check)",
+	SubUrlsGetUA:         "clash.meta (https://github.com/55gY/subs-check)",
 	RemoveFailedSubRetry: -1, // 默认永不删除，避免误删用户订阅
 }
 

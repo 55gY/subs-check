@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/beck-8/subs-check/config"
-	"github.com/beck-8/subs-check/utils"
+	"github.com/55gY/subs-check/config"
+	"github.com/55gY/subs-check/utils"
 	"github.com/metacubex/mihomo/common/convert"
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v3"
@@ -64,9 +64,6 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 				return
 			}
 
-			// 获取成功，记录到成功列表
-			successSubsChan <- url
-
 			var tag string
 			if d, err := u.Parse(url); err == nil {
 				tag = d.Fragment
@@ -78,8 +75,10 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 				proxyList, err := convert.ConvertsV2Ray(data)
 				if err != nil {
 					slog.Error(fmt.Sprintf("解析proxy错误: %v", err), "url", url)
+					failedSubsChan <- url
 					return
 				}
+				successSubsChan <- url
 				slog.Debug(fmt.Sprintf("获取订阅链接: %s，有效节点数量: %d", url, len(proxyList)))
 				for _, proxy := range proxyList {
 					// 只测试指定协议
@@ -100,13 +99,16 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 			proxyInterface, ok := con["proxies"]
 			if !ok || proxyInterface == nil {
 				slog.Error(fmt.Sprintf("订阅链接没有proxies: %s", url))
+				failedSubsChan <- url
 				return
 			}
 
 			proxyList, ok := proxyInterface.([]any)
 			if !ok {
+				failedSubsChan <- url
 				return
 			}
+			successSubsChan <- url
 			slog.Debug(fmt.Sprintf("获取订阅链接: %s，有效节点数量: %d", url, len(proxyList)))
 			for _, proxy := range proxyList {
 				if proxyMap, ok := proxy.(map[string]any); ok {
