@@ -13,7 +13,7 @@ import (
 
 	"github.com/55gY/subs-check/config"
 )
-
+ 
 type sub struct {
 	Content string           `json:"content"`
 	Name    string           `json:"name"`
