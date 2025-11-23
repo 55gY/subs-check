@@ -298,12 +298,20 @@ func (app *App) getStatus(c *gin.Context) {
 	subsProgress := proxyutils.SubsFetchProgress.Load()
 	
 	var available uint32
+	var failed int32
+	var stage string // "subscription" 或 "nodetest"
+	
 	if subsTotal > 0 && subsProgress < subsTotal {
 		// 订阅获取阶段:显示成功获取的订阅数
 		available = uint32(proxyutils.SubsFetchSuccess.Load())
+		failed = proxyutils.SubsFetchFailed.Load()
+		stage = "subscription"
 	} else {
 		// 节点检测阶段:显示可用节点数
 		available = check.Available.Load()
+		// 节点阶段的失败数 = 已处理 - 可用数
+		failed = int32(check.Progress.Load()) - int32(available)
+		stage = "nodetest"
 	}
 	
 	c.JSON(http.StatusOK, gin.H{
@@ -311,6 +319,8 @@ func (app *App) getStatus(c *gin.Context) {
 		"proxyCount": check.ProxyCount.Load(),
 		"available":  available,
 		"progress":   check.Progress.Load(),
+		"failed":     failed,
+		"stage":      stage,
 	})
 }
 

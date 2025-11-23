@@ -58,6 +58,7 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 	markSuccess := func(url string) {
 		successSubsChan <- url
 		successTotal.Add(1)
+		completedTotal.Add(1) // 先增加完成数
 		SubsFetchSuccess.Store(successTotal.Load())
 		SubsFetchProgress.Store(completedTotal.Load())
 	}
@@ -66,6 +67,7 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 	markFailed := func(url string) {
 		failedSubsChan <- url
 		failedTotal.Add(1)
+		completedTotal.Add(1) // 先增加完成数
 		SubsFetchFailed.Store(failedTotal.Load())
 		SubsFetchProgress.Store(completedTotal.Load())
 	}
@@ -115,7 +117,6 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 		go func(url string) {
 			defer wg.Done()
 			defer func() { <-concurrentLimit }() // 释放令牌
-			defer completedTotal.Add(1)
 
 			data, err := GetDateFromSubs(url)
 			if err != nil {
@@ -176,15 +177,14 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 						}
 					}
 
-					// 为每个节点添加订阅链接来源信息和备注
-					proxy["sub_url"] = url
-					proxy["sub_tag"] = tag
-					proxyChan <- proxy
-				}
-				return
+				// 为每个节点添加订阅链接来源信息和备注
+				proxy["sub_url"] = url
+				proxy["sub_tag"] = tag
+				proxyChan <- proxy
 			}
-
-		proxyInterface, ok := con["proxies"]
+			markSuccess(url) // 成功解析V2Ray格式
+			return
+		}		proxyInterface, ok := con["proxies"]
 		if !ok || proxyInterface == nil {
 			slog.Error(fmt.Sprintf("订阅链接没有proxies: %s", url))
 			markFailed(url)
