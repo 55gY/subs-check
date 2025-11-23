@@ -56,20 +56,18 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 	
 	// 辅助函数：标记成功
 	markSuccess := func(url string) {
-		completedTotal.Add(1) // 先增加完成数
-		successTotal.Add(1)   // 再增加成功数
-		SubsFetchProgress.Store(completedTotal.Load()) // 先更新进度
-		SubsFetchSuccess.Store(successTotal.Load())    // 再更新成功数
-		successSubsChan <- url // 最后发送到channel(非阻塞因为有缓冲)
+		successSubsChan <- url
+		successTotal.Add(1)
+		SubsFetchSuccess.Store(successTotal.Load())
+		SubsFetchProgress.Store(completedTotal.Load())
 	}
 	
 	// 辅助函数：标记失败
 	markFailed := func(url string) {
-		completedTotal.Add(1) // 先增加完成数
-		failedTotal.Add(1)    // 再增加失败数
-		SubsFetchProgress.Store(completedTotal.Load()) // 先更新进度
-		SubsFetchFailed.Store(failedTotal.Load())      // 再更新失败数
-		failedSubsChan <- url // 最后发送到channel(非阻塞因为有缓冲)
+		failedSubsChan <- url
+		failedTotal.Add(1)
+		SubsFetchFailed.Store(failedTotal.Load())
+		SubsFetchProgress.Store(completedTotal.Load())
 	}
 
 	// 启动进度显示(如果配置开启)
@@ -117,6 +115,7 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 		go func(url string) {
 			defer wg.Done()
 			defer func() { <-concurrentLimit }() // 释放令牌
+			defer completedTotal.Add(1)
 
 			data, err := GetDateFromSubs(url)
 			if err != nil {
@@ -182,14 +181,13 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					proxy["sub_tag"] = tag
 					proxyChan <- proxy
 				}
-				markSuccess(url) // 成功解析V2Ray格式
 				return
 			}
 
-			proxyInterface, ok := con["proxies"]
-			if !ok || proxyInterface == nil {
-				slog.Error(fmt.Sprintf("订阅链接没有proxies: %s", url))
-				markFailed(url)
+		proxyInterface, ok := con["proxies"]
+		if !ok || proxyInterface == nil {
+			slog.Error(fmt.Sprintf("订阅链接没有proxies: %s", url))
+			markFailed(url)
 				return
 			}
 
