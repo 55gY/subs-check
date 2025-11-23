@@ -12,6 +12,7 @@ import (
 
 	"github.com/55gY/subs-check/check"
 	"github.com/55gY/subs-check/config"
+	proxyutils "github.com/55gY/subs-check/proxy"
 	"github.com/55gY/subs-check/save/method"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
@@ -292,10 +293,23 @@ func (app *App) addConfig(c *gin.Context) {
 
 // getStatus 获取应用状态
 func (app *App) getStatus(c *gin.Context) {
+	// 判断是否在订阅获取阶段
+	subsTotal := proxyutils.SubsFetchTotal.Load()
+	subsProgress := proxyutils.SubsFetchProgress.Load()
+	
+	var available uint32
+	if subsTotal > 0 && subsProgress < subsTotal {
+		// 订阅获取阶段:显示成功获取的订阅数
+		available = uint32(proxyutils.SubsFetchSuccess.Load())
+	} else {
+		// 节点检测阶段:显示可用节点数
+		available = check.Available.Load()
+	}
+	
 	c.JSON(http.StatusOK, gin.H{
 		"checking":   app.checking.Load(),
 		"proxyCount": check.ProxyCount.Load(),
-		"available":  check.Available.Load(),
+		"available":  available,
 		"progress":   check.Progress.Load(),
 	})
 }

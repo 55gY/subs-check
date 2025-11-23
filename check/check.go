@@ -100,6 +100,9 @@ func Check() ([]Result, error) {
 	tmp, failedSubs, successSubs, err := proxyutils.GetProxies()
 	close(subsFetchDone) // 停止进度同步
 	
+	// 订阅获取完成,重置订阅进度变量(标记订阅阶段结束)
+	proxyutils.SubsFetchTotal.Store(0)
+	
 	if err != nil {
 		return nil, fmt.Errorf("获取节点失败: %w", err)
 	}
