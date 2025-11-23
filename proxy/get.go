@@ -122,14 +122,14 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					// 结构化提取失败时，回退到对原始文本进行正则提取
 					fallbackLinks := extractV2RayLinks(data)
 					if len(fallbackLinks) > 0 {
-						extractedData := []byte(strings.Join(fallbackLinks, "\n"))
-						proxyList, err = convert.ConvertsV2Ray(extractedData)
-						if err != nil {
-							slog.Error(fmt.Sprintf("解析回退文本中提取的V2Ray链接错误: %v", err), "url", url)
-							failedSubsChan <- url
-							return
-						}
-						// 最终回退：将按 URL 猜测协议头处理纯文本/数组
+					extractedData := []byte(strings.Join(fallbackLinks, "\n"))
+					proxyList, err = convert.ConvertsV2Ray(extractedData)
+					if err != nil {
+						slog.Error(fmt.Sprintf("解析回退文本中提取的V2Ray链接错误: %v", err), "url", url)
+						markFailed(url)
+						return
+					}
+					// 最终回退：将按 URL 猜测协议头处理纯文本/数组
 						if guessed := convertUnStandandTextViaConvert(url, data); len(guessed) > 0 {
 							for _, proxy := range guessed {
 								if t, ok := proxy["type"].(string); ok {
@@ -141,16 +141,16 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 								proxy["sub_tag"] = tag
 								proxyChan <- proxy
 							}
-							successSubsChan <- url
+							markSuccess(url)
 							return
 						}
 					} else {
 						slog.Error(fmt.Sprintf("解析proxy错误: %v", err), "url", url)
-						failedSubsChan <- url
+						markFailed(url)
 						return
 					}
 				}
-				successSubsChan <- url
+				markSuccess(url)
 				slog.Debug(fmt.Sprintf("获取订阅链接: %s，有效节点数量: %d", url, len(proxyList)))
 				for _, proxy := range proxyList {
 					// 只测试指定协议
@@ -168,16 +168,16 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 				return
 			}
 
-			proxyInterface, ok := con["proxies"]
-			if !ok || proxyInterface == nil {
-				slog.Error(fmt.Sprintf("订阅链接没有proxies: %s", url))
-				failedSubsChan <- url
+		proxyInterface, ok := con["proxies"]
+		if !ok || proxyInterface == nil {
+			slog.Error(fmt.Sprintf("订阅链接没有proxies: %s", url))
+			markFailed(url)
 				return
 			}
 
 			proxyList, ok := proxyInterface.([]any)
 			if !ok {
-				failedSubsChan <- url
+				markFailed(url)
 				return
 			}
 			// 若 proxies 是字符串数组（ip:port），按 URL 猜测协议头后统一走 ConvertsV2Ray
@@ -206,12 +206,12 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 							proxy["sub_tag"] = tag
 							proxyChan <- proxy
 						}
-						successSubsChan <- url
+						markSuccess(url)
 						return
 					}
 				}
 			}
-			successSubsChan <- url
+			markSuccess(url)
 			slog.Debug(fmt.Sprintf("获取订阅链接: %s，有效节点数量: %d", url, len(proxyList)))
 			for _, proxy := range proxyList {
 				if proxyMap, ok := proxy.(map[string]any); ok {
