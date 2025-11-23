@@ -110,10 +110,21 @@ func Check() ([]Result, error) {
 	slog.Info(fmt.Sprintf("去重并乱序后节点数量: %d", len(proxies)))
 
 	// 4. 初始化进度追踪
-	speedON := config.GlobalConfig.SpeedTestUrl != ""
+	speedON := config.GlobalConfig.SpeedTestUrl != "" && strings.TrimSpace(config.GlobalConfig.SpeedTestUrl) != ""
 	mediaON := config.GlobalConfig.MediaCheck
 	progressWeight = getCheckWeight(speedON, mediaON)
 	tracker := NewProgressTracker(len(proxies))
+	
+	slog.Info("检测模式配置", 
+		"存活检测", true,
+		"测速检测", speedON, 
+		"媒体检测", mediaON,
+		"最低速度(KB/s)", config.GlobalConfig.MinSpeed,
+		"测速URL", config.GlobalConfig.SpeedTestUrl)
+	
+	if !speedON && !mediaON {
+		slog.Info("⚡ 快速模式：仅进行存活检测（未启用测速和媒体检测）")
+	}
 
 	// 5. 初始化限速桶
 	if config.GlobalConfig.TotalSpeedLimit != 0 {
@@ -137,6 +148,7 @@ func Check() ([]Result, error) {
 	mediaConc := getConcurrency(len(proxies), baseConcurrent, 0.2)
 
 	slog.Info("启动检测流水线", "alive_workers", aliveConc, "speed_workers", speedConc, "media_workers", mediaConc)
+	slog.Info("检测参数", "speed_enabled", speedON, "media_enabled", mediaON, "min_speed_kb", config.GlobalConfig.MinSpeed)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -224,6 +236,12 @@ func Check() ([]Result, error) {
 	gcDone <- true
 	runtime.GC()
 
+	slog.Info("检测完成统计", 
+		"总节点数", len(proxies), 
+		"存活节点数", tracker.aliveSuccess.Load(),
+		"测速通过数", tracker.speedSuccess.Load(),
+		"媒体检测数", tracker.mediaDone.Load(),
+		"最终可用数", len(results))
 	slog.Info(fmt.Sprintf("可用节点数量: %d", len(results)))
 	slog.Info(fmt.Sprintf("测试总消耗流量: %.3fGB", float64(TotalBytes.Load())/1024/1024/1024))
 
@@ -259,6 +277,7 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 
 			client := CreateClient(item.ProxyMap)
 			if client == nil {
+				slog.Debug("CreateClient失败", "proxy", item.ProxyMap["name"])
 				tracker.CountAlive(false)
 				continue
 			}
@@ -267,6 +286,7 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 
 			google, err := platform.CheckAlive(client.Client)
 			if err != nil || !google {
+				slog.Debug("存活检测失败", "proxy", item.ProxyMap["name"], "error", err)
 				client.Close()
 				tracker.CountAlive(false)
 				continue
@@ -299,6 +319,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 			}
 			speed, _, err := platform.CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
 			if err != nil || speed < config.GlobalConfig.MinSpeed {
+				slog.Debug("测速失败或未达标", "proxy", item.ProxyMap["name"], "speed_kb", speed, "min_required", config.GlobalConfig.MinSpeed, "error", err)
 				item.Client.Close()
 				tracker.CountSpeed(false)
 				continue

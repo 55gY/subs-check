@@ -21,6 +21,18 @@ CONFIG_PATH="${SCRIPT_DIR}/config/config.yaml"
 SERVICE_NAME="subs-check.service"
 SERVICE_PATH="/lib/systemd/system/${SERVICE_NAME}"
 GITHUB_REPO="55gY/subs-check"
+
+# GitHub 加速镜像列表（按优先级排序）
+GITHUB_MIRRORS=(
+    "https://xuc.xi-xu.me/"
+    "https://ghfast.top/"
+    "https://github.akams.cn/"
+    "https://gh-proxy.com/"
+    "https://kkgithub.com/"
+    "https://xiake.pro/"
+    ""  # 直连
+    
+)
  
 # 显示 Logo
 show_logo() {
@@ -170,18 +182,42 @@ download_binary() {
     local download_url="$1"
     local tmp_file="/tmp/subs-check-latest.tar.gz"
     
-    echo -e "${BLUE}下载地址: ${download_url}${NC}"
-    echo -e "${YELLOW}正在下载...${NC}"
+    echo -e "${YELLOW}正在尝试下载二进制文件...${NC}"
     
-    if command -v curl &> /dev/null; then
-        curl -L --progress-bar -o "$tmp_file" "$download_url"
-    else
-        wget --show-progress -O "$tmp_file" "$download_url"
-    fi
+    # 尝试使用不同的镜像下载
+    local success=0
+    for mirror in "${GITHUB_MIRRORS[@]}"; do
+        local url="${mirror}${download_url}"
+        
+        if [ -z "$mirror" ]; then
+            echo -e "${BLUE}尝试直连 GitHub...${NC}"
+        else
+            echo -e "${BLUE}尝试镜像: ${mirror}${NC}"
+        fi
+        
+        # 使用超时和重试
+        if command -v curl &> /dev/null; then
+            curl -L --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 2 \
+                 --progress-bar -o "$tmp_file" "$url"
+        else
+            wget --timeout=10 --tries=3 --waitretry=2 \
+                 --show-progress -O "$tmp_file" "$url"
+        fi
+        
+        if [ $? -eq 0 ] && [ -f "$tmp_file" ] && [ -s "$tmp_file" ]; then
+            success=1
+            echo -e "${GREEN}✓ 下载成功${NC}"
+            break
+        else
+            echo -e "${YELLOW}下载失败，尝试下一个镜像...${NC}"
+            rm -f "$tmp_file"
+        fi
+    done
     
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}错误: 下载失败${NC}"
-        rm -f "$tmp_file"
+    if [ $success -eq 0 ]; then
+        echo -e "${RED}错误: 所有镜像均下载失败${NC}"
+        echo -e "${YELLOW}请检查网络连接或稍后重试${NC}"
+        echo -e "${YELLOW}也可以手动下载: ${download_url}${NC}"
         exit 1
     fi
     
@@ -208,19 +244,41 @@ download_config() {
     
     mkdir -p "$(dirname "$CONFIG_PATH")"
     
-    if command -v curl &> /dev/null; then
-        curl -L -o "$CONFIG_PATH" "$config_url"
-    else
-        wget -O "$CONFIG_PATH" "$config_url"
-    fi
+    # 尝试使用不同的镜像下载
+    local success=0
+    for mirror in "${GITHUB_MIRRORS[@]}"; do
+        local url="${mirror}${config_url}"
+        
+        if [ -z "$mirror" ]; then
+            echo -e "${BLUE}尝试直连 GitHub...${NC}"
+        else
+            echo -e "${BLUE}尝试镜像: ${mirror}${NC}"
+        fi
+        
+        if command -v curl &> /dev/null; then
+            curl -L --connect-timeout 10 --max-time 60 --retry 3 --retry-delay 2 \
+                 -o "$CONFIG_PATH" "$url"
+        else
+            wget --timeout=10 --tries=3 --waitretry=2 \
+                 -O "$CONFIG_PATH" "$url"
+        fi
+        
+        if [ $? -eq 0 ] && [ -f "$CONFIG_PATH" ] && [ -s "$CONFIG_PATH" ]; then
+            success=1
+            echo -e "${GREEN}✓ 配置文件下载成功${NC}"
+            break
+        else
+            echo -e "${YELLOW}下载失败，尝试下一个镜像...${NC}"
+            rm -f "$CONFIG_PATH"
+        fi
+    done
     
-    if [ $? -ne 0 ]; then
+    if [ $success -eq 0 ]; then
         echo -e "${RED}错误: 配置文件下载失败${NC}"
-        echo "请手动从以下地址下载: $config_url"
+        echo -e "${YELLOW}请手动从以下地址下载: ${config_url}${NC}"
         exit 1
     fi
     
-    echo -e "${GREEN}✓ 配置文件下载成功${NC}"
     echo -e "${YELLOW}配置文件位置: ${CONFIG_PATH}${NC}"
     echo -e "${YELLOW}请根据需要编辑配置文件${NC}"
 }
