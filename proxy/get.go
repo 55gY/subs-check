@@ -23,11 +23,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// 订阅获取进度统计(供外部读取)
+var SubsFetchProgress atomic.Int32  // 已完成数
+var SubsFetchTotal atomic.Int32     // 总数
+var SubsFetchSuccess atomic.Int32   // 成功数
+var SubsFetchFailed atomic.Int32    // 失败数
+
 func GetProxies() ([]map[string]any, []string, []string, error) {
 
 	// 解析本地与远程订阅清单
 	subUrls, localNum, remoteNum := resolveSubUrls()
 	slog.Info("订阅链接数量", "本地", localNum, "远程", remoteNum, "总计", len(subUrls))
+
+	// 初始化订阅获取进度
+	SubsFetchTotal.Store(int32(len(subUrls)))
+	SubsFetchProgress.Store(0)
+	SubsFetchSuccess.Store(0)
+	SubsFetchFailed.Store(0)
 
 	if len(config.GlobalConfig.NodeType) > 0 {
 		slog.Info("只筛选用户设置的协议", "type", config.GlobalConfig.NodeType)
@@ -46,12 +58,16 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 	markSuccess := func(url string) {
 		successSubsChan <- url
 		successTotal.Add(1)
+		SubsFetchSuccess.Store(successTotal.Load())
+		SubsFetchProgress.Store(completedTotal.Load())
 	}
 	
 	// 辅助函数：标记失败
 	markFailed := func(url string) {
 		failedSubsChan <- url
 		failedTotal.Add(1)
+		SubsFetchFailed.Store(failedTotal.Load())
+		SubsFetchProgress.Store(completedTotal.Load())
 	}
 
 	// 启动进度显示(如果配置开启)

@@ -75,7 +75,31 @@ func Check() ([]Result, error) {
 		slog.Info(fmt.Sprintf("添加之前测试成功的节点，数量: %d", len(config.GlobalProxies)))
 		proxies = append(proxies, config.GlobalProxies...)
 	}
+	
+	// 启动订阅获取进度同步到全局Progress
+	subsFetchDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-subsFetchDone:
+				return
+			case <-ticker.C:
+				total := proxyutils.SubsFetchTotal.Load()
+				if total > 0 {
+					progress := proxyutils.SubsFetchProgress.Load()
+					// 将订阅获取进度映射到0-100的范围
+					Progress.Store(uint32(progress))
+					ProxyCount.Store(uint32(total))
+				}
+			}
+		}
+	}()
+	
 	tmp, failedSubs, successSubs, err := proxyutils.GetProxies()
+	close(subsFetchDone) // 停止进度同步
+	
 	if err != nil {
 		return nil, fmt.Errorf("获取节点失败: %w", err)
 	}
