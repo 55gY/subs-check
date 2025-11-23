@@ -44,7 +44,10 @@ func (app *App) loadConfig() error {
 		return fmt.Errorf("解析配置文件失败: %w", err)
 	}
 
-	slog.Info("配置文件读取成功")
+	slog.Info("配置文件读取成功",
+		"speed-test-url", config.GlobalConfig.SpeedTestUrl,
+		"min-speed", config.GlobalConfig.MinSpeed,
+		"alive-test-url", config.GlobalConfig.AliveTestUrl)
 	return nil
 }
 
