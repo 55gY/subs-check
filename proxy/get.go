@@ -177,17 +177,19 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 						}
 					}
 
-				// 为每个节点添加订阅链接来源信息和备注
-				proxy["sub_url"] = url
-				proxy["sub_tag"] = tag
-				proxyChan <- proxy
+					// 为每个节点添加订阅链接来源信息和备注
+					proxy["sub_url"] = url
+					proxy["sub_tag"] = tag
+					proxyChan <- proxy
+				}
+				markSuccess(url) // 成功解析V2Ray格式
+				return
 			}
-			markSuccess(url) // 成功解析V2Ray格式
-			return
-		}		proxyInterface, ok := con["proxies"]
-		if !ok || proxyInterface == nil {
-			slog.Error(fmt.Sprintf("订阅链接没有proxies: %s", url))
-			markFailed(url)
+
+			proxyInterface, ok := con["proxies"]
+			if !ok || proxyInterface == nil {
+				slog.Error(fmt.Sprintf("订阅链接没有proxies: %s", url))
+				markFailed(url)
 				return
 			}
 
