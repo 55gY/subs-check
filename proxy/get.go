@@ -8,8 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	u "net/url"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,9 +78,36 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 			if err != nil {
 				proxyList, err := convert.ConvertsV2Ray(data)
 				if err != nil {
-					slog.Error(fmt.Sprintf("解析proxy错误: %v", err), "url", url)
-					failedSubsChan <- url
-					return
+					// 结构化提取失败时，回退到对原始文本进行正则提取
+					fallbackLinks := extractV2RayLinks(data)
+					if len(fallbackLinks) > 0 {
+						extractedData := []byte(strings.Join(fallbackLinks, "\n"))
+						proxyList, err = convert.ConvertsV2Ray(extractedData)
+						if err != nil {
+							slog.Error(fmt.Sprintf("解析回退文本中提取的V2Ray链接错误: %v", err), "url", url)
+							failedSubsChan <- url
+							return
+						}
+						// 最终回退：将按 URL 猜测协议头处理纯文本/数组
+						if guessed := convertUnStandandTextViaConvert(url, data); len(guessed) > 0 {
+							for _, proxy := range guessed {
+								if t, ok := proxy["type"].(string); ok {
+									if len(config.GlobalConfig.NodeType) > 0 && !lo.Contains(config.GlobalConfig.NodeType, t) {
+										continue
+									}
+								}
+								proxy["sub_url"] = url
+								proxy["sub_tag"] = tag
+								proxyChan <- proxy
+							}
+							successSubsChan <- url
+							return
+						}
+					} else {
+						slog.Error(fmt.Sprintf("解析proxy错误: %v", err), "url", url)
+						failedSubsChan <- url
+						return
+					}
 				}
 				successSubsChan <- url
 				slog.Debug(fmt.Sprintf("获取订阅链接: %s，有效节点数量: %d", url, len(proxyList)))
@@ -107,6 +138,37 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 			if !ok {
 				failedSubsChan <- url
 				return
+			}
+			// 若 proxies 是字符串数组（ip:port），按 URL 猜测协议头后统一走 ConvertsV2Ray
+			{
+				strArr := make([]string, 0, len(proxyList))
+				for _, it := range proxyList {
+					if s, ok := it.(string); ok {
+						s = strings.TrimSpace(s)
+						if s != "" {
+							strArr = append(strArr, s)
+						}
+					}
+				}
+				if len(strArr) > 0 {
+					con2 := map[string]any{guessSchemeByURL(url): strArr}
+					converted := convertUnStandandJsonViaConvert(con2)
+					if len(converted) > 0 {
+						slog.Debug(fmt.Sprintf("proxies为字符串数组，已按URL猜测协议转换: %s，数量: %d", url, len(converted)))
+						for _, proxy := range converted {
+							if t, ok := proxy["type"].(string); ok {
+								if len(config.GlobalConfig.NodeType) > 0 && !lo.Contains(config.GlobalConfig.NodeType, t) {
+									continue
+								}
+							}
+							proxy["sub_url"] = url
+							proxy["sub_tag"] = tag
+							proxyChan <- proxy
+						}
+						successSubsChan <- url
+						return
+					}
+				}
 			}
 			successSubsChan <- url
 			slog.Debug(fmt.Sprintf("获取订阅链接: %s，有效节点数量: %d", url, len(proxyList)))
@@ -300,4 +362,86 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("重试%d次后失败: %v", maxRetries, lastErr)
+}
+
+func extractV2RayLinks(data []byte) []string {
+	re := regexp.MustCompile(`(?i)(vmess|vless|ss|ssr|trojan|hysteria|hysteria2|tuic|juicity)://[a-zA-Z0-9\-_@.:/?=&%#]+`)
+	matches := re.FindAllString(string(data), -1)
+	return matches
+}
+
+func guessSchemeByURL(url string) string {
+	lower := strings.ToLower(url)
+	if strings.Contains(lower, "vmess") {
+		return "vmess"
+	}
+	if strings.Contains(lower, "vless") {
+		return "vless"
+	}
+	if strings.Contains(lower, "ss") || strings.Contains(lower, "shadowsocks") {
+		return "ss"
+	}
+	if strings.Contains(lower, "ssr") {
+		return "ssr"
+	}
+	if strings.Contains(lower, "trojan") {
+		return "trojan"
+	}
+	if strings.Contains(lower, "hysteria2") || strings.Contains(lower, "hy2") {
+		return "hysteria2"
+	}
+	if strings.Contains(lower, "hysteria") {
+		return "hysteria"
+	}
+	if strings.Contains(lower, "tuic") {
+		return "tuic"
+	}
+	return "vmess"
+}
+
+func convertUnStandandTextViaConvert(url string, data []byte) []map[string]any {
+	lines := strings.Split(string(data), "\n")
+	var links []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "://") {
+			links = append(links, line)
+		}
+	}
+	
+	if len(links) > 0 {
+		newData := []byte(strings.Join(links, "\n"))
+		proxies, err := convert.ConvertsV2Ray(newData)
+		if err == nil && len(proxies) > 0 {
+			return proxies
+		}
+	}
+	return nil
+}
+
+func convertUnStandandJsonViaConvert(data map[string]any) []map[string]any {
+	var links []string
+	for _, v := range data {
+		if arr, ok := v.([]string); ok {
+			links = append(links, arr...)
+		} else if arr, ok := v.([]any); ok {
+			for _, item := range arr {
+				if s, ok := item.(string); ok {
+					links = append(links, s)
+				}
+			}
+		}
+	}
+	
+	if len(links) > 0 {
+		newData := []byte(strings.Join(links, "\n"))
+		proxies, err := convert.ConvertsV2Ray(newData)
+		if err == nil && len(proxies) > 0 {
+			return proxies
+		}
+	}
+	return nil
 }
