@@ -4,7 +4,7 @@ import (
 	"math"
 	"sync/atomic"
 )
-
+ 
 // 默认使用动态权重显示进度条
 var progressAlgorithm ProgressAlgorithm
 
