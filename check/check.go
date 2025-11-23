@@ -106,7 +106,7 @@ func Check() ([]Result, error) {
 	proxies = proxyutils.DeduplicateProxies(proxies)
 	
 	// 3. 智能乱序 (Smart Shuffle)
-	proxies = proxyutils.SmartShuffleByServer(proxies, nil)
+	proxyutils.SmartShuffleByServer(proxies, proxyutils.ShuffleConfig{})
 	slog.Info(fmt.Sprintf("去重并乱序后节点数量: %d", len(proxies)))
 
 	// 4. 初始化进度追踪

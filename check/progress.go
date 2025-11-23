@@ -1,13 +1,8 @@
 package check
 
 import (
-	"fmt"
 	"math"
-	"strings"
 	"sync/atomic"
-	"time"
-
-	"github.com/55gY/subs-check/config"
 )
 
 // 默认使用动态权重显示进度条
