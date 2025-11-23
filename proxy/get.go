@@ -56,20 +56,20 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 	
 	// 辅助函数：标记成功
 	markSuccess := func(url string) {
-		successSubsChan <- url
 		completedTotal.Add(1) // 先增加完成数
 		successTotal.Add(1)   // 再增加成功数
 		SubsFetchProgress.Store(completedTotal.Load()) // 先更新进度
 		SubsFetchSuccess.Store(successTotal.Load())    // 再更新成功数
+		successSubsChan <- url // 最后发送到channel(非阻塞因为有缓冲)
 	}
 	
 	// 辅助函数：标记失败
 	markFailed := func(url string) {
-		failedSubsChan <- url
 		completedTotal.Add(1) // 先增加完成数
 		failedTotal.Add(1)    // 再增加失败数
 		SubsFetchProgress.Store(completedTotal.Load()) // 先更新进度
 		SubsFetchFailed.Store(failedTotal.Load())      // 再更新失败数
+		failedSubsChan <- url // 最后发送到channel(非阻塞因为有缓冲)
 	}
 
 	// 启动进度显示(如果配置开启)
