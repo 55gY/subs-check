@@ -99,6 +99,7 @@ func Check() ([]Result, error) {
 	
 	tmp, failedSubs, successSubs, err := proxyutils.GetProxies()
 	close(subsFetchDone) // 停止进度同步
+	slog.Info("订阅获取完成", "failedCount", len(failedSubs), "successCount", len(successSubs))
 	
 	if err != nil {
 		return nil, fmt.Errorf("获取节点失败: %w", err)
@@ -127,13 +128,16 @@ func Check() ([]Result, error) {
 	}
 
 	config.GlobalProxies = make([]map[string]any, 0)
+	slog.Info("开始去重节点...")
 	proxies = proxyutils.DeduplicateProxies(proxies)
 	
 	// 3. 智能乱序 (Smart Shuffle)
+	slog.Info("开始乱序节点...")
 	proxyutils.SmartShuffleByServer(proxies, proxyutils.ShuffleConfig{})
 	slog.Info(fmt.Sprintf("去重并乱序后节点数量: %d", len(proxies)))
 
 	// 去重完成后先更新节点总数和重置进度,再重置订阅变量(标记阶段切换)
+	slog.Info("更新节点计数和重置订阅进度...")
 	ProxyCount.Store(uint32(len(proxies)))
 	Progress.Store(0) // 重置进度,准备开始节点检测
 	// 重置所有订阅进度变量,标记订阅阶段结束
@@ -141,6 +145,7 @@ func Check() ([]Result, error) {
 	proxyutils.SubsFetchProgress.Store(0)
 	proxyutils.SubsFetchSuccess.Store(0)
 	proxyutils.SubsFetchFailed.Store(0)
+	slog.Info("订阅阶段完成,准备开始节点检测", "nodeCount", len(proxies))
 
 	// 4. 初始化进度追踪
 	speedON := config.GlobalConfig.SpeedTestUrl != "" && strings.TrimSpace(config.GlobalConfig.SpeedTestUrl) != ""
