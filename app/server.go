@@ -82,7 +82,7 @@ func (app *App) initHttpServer() error {
 				scheme = "https"
 			}
 			host := c.Request.Host
-			subpath := fmt.Sprintf("%s://%s/sub", scheme, host)
+			subpath := fmt.Sprintf("%s://%s/sub/all.yaml", scheme, host)
 			
 			c.HTML(http.StatusOK, "admin.html", gin.H{
 				"configPath": app.configPath,

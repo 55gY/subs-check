@@ -1,7 +1,6 @@
 package proxies
 
 import (
-	"fmt"
 	"math/rand"
 	"net"
 	"time"
