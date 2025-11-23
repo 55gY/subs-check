@@ -89,7 +89,7 @@ func Check() ([]Result, error) {
 				total := proxyutils.SubsFetchTotal.Load()
 				if total > 0 {
 					progress := proxyutils.SubsFetchProgress.Load()
-					// 将订阅获取进度映射到0-100的范围
+					// 订阅阶段:将进度同步到Progress和ProxyCount用于前端显示
 					Progress.Store(uint32(progress))
 					ProxyCount.Store(uint32(total))
 				}
@@ -99,9 +99,6 @@ func Check() ([]Result, error) {
 	
 	tmp, failedSubs, successSubs, err := proxyutils.GetProxies()
 	close(subsFetchDone) // 停止进度同步
-	
-	// 订阅获取完成,重置订阅进度变量(标记订阅阶段结束)
-	proxyutils.SubsFetchTotal.Store(0)
 	
 	if err != nil {
 		return nil, fmt.Errorf("获取节点失败: %w", err)
@@ -135,6 +132,12 @@ func Check() ([]Result, error) {
 	// 3. 智能乱序 (Smart Shuffle)
 	proxyutils.SmartShuffleByServer(proxies, proxyutils.ShuffleConfig{})
 	slog.Info(fmt.Sprintf("去重并乱序后节点数量: %d", len(proxies)))
+
+	// 去重完成后更新节点总数,然后重置订阅进度(标记订阅阶段结束)
+	ProxyCount.Store(uint32(len(proxies)))
+	Progress.Store(0) // 重置进度,准备开始节点检测
+	proxyutils.SubsFetchTotal.Store(0)
+	proxyutils.SubsFetchProgress.Store(0)
 
 	// 4. 初始化进度追踪
 	speedON := config.GlobalConfig.SpeedTestUrl != "" && strings.TrimSpace(config.GlobalConfig.SpeedTestUrl) != ""
