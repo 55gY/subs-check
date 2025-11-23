@@ -133,11 +133,14 @@ func Check() ([]Result, error) {
 	proxyutils.SmartShuffleByServer(proxies, proxyutils.ShuffleConfig{})
 	slog.Info(fmt.Sprintf("去重并乱序后节点数量: %d", len(proxies)))
 
-	// 去重完成后更新节点总数,然后重置订阅进度(标记订阅阶段结束)
+	// 去重完成后先更新节点总数和重置进度,再重置订阅变量(标记阶段切换)
 	ProxyCount.Store(uint32(len(proxies)))
 	Progress.Store(0) // 重置进度,准备开始节点检测
+	// 重置所有订阅进度变量,标记订阅阶段结束
 	proxyutils.SubsFetchTotal.Store(0)
 	proxyutils.SubsFetchProgress.Store(0)
+	proxyutils.SubsFetchSuccess.Store(0)
+	proxyutils.SubsFetchFailed.Store(0)
 
 	// 4. 初始化进度追踪
 	speedON := config.GlobalConfig.SpeedTestUrl != "" && strings.TrimSpace(config.GlobalConfig.SpeedTestUrl) != ""

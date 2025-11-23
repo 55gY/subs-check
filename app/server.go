@@ -295,14 +295,14 @@ func (app *App) addConfig(c *gin.Context) {
 func (app *App) getStatus(c *gin.Context) {
 	// 判断是否在订阅获取阶段
 	subsTotal := proxyutils.SubsFetchTotal.Load()
-	subsProgress := proxyutils.SubsFetchProgress.Load()
 	
 	var available uint32
 	var failed int32
 	var stage string // "subscription" 或 "nodetest"
 	
-	if subsTotal > 0 && subsProgress < subsTotal {
+	if subsTotal > 0 {
 		// 订阅获取阶段:显示成功获取的订阅数
+		// 只要subsTotal>0就认为在订阅阶段,直到显式重置为0
 		available = uint32(proxyutils.SubsFetchSuccess.Load())
 		failed = proxyutils.SubsFetchFailed.Load()
 		stage = "subscription"
@@ -311,6 +311,9 @@ func (app *App) getStatus(c *gin.Context) {
 		available = check.Available.Load()
 		// 节点阶段的失败数 = 已处理 - 可用数
 		failed = int32(check.Progress.Load()) - int32(available)
+		if failed < 0 {
+			failed = 0 // 防止负数
+		}
 		stage = "nodetest"
 	}
 	
