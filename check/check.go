@@ -309,17 +309,28 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 }
 
 func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- PipelineItem, resOut chan<- Result, tracker *ProgressTracker, mediaON bool) {
+	processedCount := 0
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("speedWorker退出", "已处理", processedCount)
 			return
 		case item, ok := <-in:
 			if !ok {
+				slog.Info("speedWorker接收到关闭信号", "已处理", processedCount)
 				return
 			}
+			processedCount++
+			
 			speed, _, err := platform.CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
-			if err != nil || speed < config.GlobalConfig.MinSpeed {
-				slog.Debug("测速失败或未达标", "proxy", item.ProxyMap["name"], "speed_kb", speed, "min_required", config.GlobalConfig.MinSpeed, "error", err)
+			if err != nil {
+				slog.Info("测速失败", "proxy", item.ProxyMap["name"], "error", err)
+				item.Client.Close()
+				tracker.CountSpeed(false)
+				continue
+			}
+			if speed < config.GlobalConfig.MinSpeed {
+				slog.Info("测速未达标", "proxy", item.ProxyMap["name"], "speed_kb", speed, "min_required", config.GlobalConfig.MinSpeed)
 				item.Client.Close()
 				tracker.CountSpeed(false)
 				continue
@@ -327,6 +338,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 			
 			item.Speed = speed
 			tracker.CountSpeed(true)
+			slog.Info("测速通过", "proxy", item.ProxyMap["name"], "speed_kb", speed)
 			
 			if mediaON {
 				mediaOut <- item
