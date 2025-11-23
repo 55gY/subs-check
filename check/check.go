@@ -530,12 +530,6 @@ func showProgress(done chan bool, total int) {
 			}
 			available := Available.Load()
 			
-			// 获取当前阶段信息 (如果有 tracker)
-			stage, stageName, stageDone, stageSuccess := int32(0), "检测中", int32(0), int32(0)
-			// 由于 showProgress 没有直接访问 tracker,我们通过全局状态获取
-			// 这里需要一个全局的 tracker 引用或者通过参数传递
-			// 暂时先用简单的显示,后面优化
-			
 			fmt.Printf("\r进度: [%-45s] %.1f%% (%d/%d) 可用: %d",
 				strings.Repeat("=", int(pct/2))+">",
 				pct,
