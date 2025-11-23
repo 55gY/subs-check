@@ -42,8 +42,11 @@ type ProgressTracker struct {
 	aliveSuccess atomic.Int32
 	speedSuccess atomic.Int32
 
-	// 当前处于 测活-测速-媒体检测 阶段
+	// 当前处于 测活-测速-媒体检测 阶段 (0=存活, 1=测速, 2=媒体)
 	currentStage atomic.Int32
+	
+	// 当前阶段名称
+	stageName atomic.Value // string
 
 	// 确保进度条输出完成
 	finalized atomic.Bool
@@ -57,6 +60,7 @@ func NewProgressTracker(total int) *ProgressTracker {
 	}
 	pt.totalJobs.Store(int32(total))
 	pt.currentStage.Store(0)
+	pt.stageName.Store("存活检测")
 
 	ProxyCount.Store(uint32(total))
 	Progress.Store(0)
@@ -161,4 +165,31 @@ func (pt *ProgressTracker) refresh() {
 	Progress.Store(uint32(virtualCurrent))
 	
 	// 也可以直接存储百分比，修改 check.go 中的 showProgress
+}
+
+// SetStage 设置当前阶段
+func (pt *ProgressTracker) SetStage(stage int32, name string) {
+	pt.currentStage.Store(stage)
+	pt.stageName.Store(name)
+}
+
+// GetStageInfo 获取当前阶段信息
+func (pt *ProgressTracker) GetStageInfo() (stage int32, name string, done, success int32) {
+	stage = pt.currentStage.Load()
+	if v := pt.stageName.Load(); v != nil {
+		name = v.(string)
+	}
+	
+	switch stage {
+	case 0: // 存活检测
+		done = pt.aliveDone.Load()
+		success = pt.aliveSuccess.Load()
+	case 1: // 测速
+		done = pt.speedDone.Load()
+		success = pt.speedSuccess.Load()
+	case 2: // 媒体检测
+		done = pt.mediaDone.Load()
+		success = 0 // 媒体检测不区分成功失败
+	}
+	return
 }

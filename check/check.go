@@ -153,6 +153,9 @@ func Check() ([]Result, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// 设置初始阶段
+	tracker.SetStage(0, "存活检测")
+
 	// 启动 Alive Workers
 	for i := 0; i < aliveConc; i++ {
 		aliveWG.Add(1)
@@ -212,10 +215,18 @@ func Check() ([]Result, error) {
 	// 级联关闭通道
 	go func() {
 		aliveWG.Wait()
+		slog.Info("存活检测完成，开始测速")
+		if speedON {
+			tracker.SetStage(1, "测速检测")
+		}
 		close(speedChan)
 	}()
 	go func() {
 		speedWG.Wait()
+		slog.Info("测速检测完成")
+		if mediaON {
+			tracker.SetStage(2, "媒体检测")
+		}
 		close(mediaChan)
 	}()
 	go func() {
@@ -518,6 +529,13 @@ func showProgress(done chan bool, total int) {
 				pct = 100
 			}
 			available := Available.Load()
+			
+			// 获取当前阶段信息 (如果有 tracker)
+			stage, stageName, stageDone, stageSuccess := int32(0), "检测中", int32(0), int32(0)
+			// 由于 showProgress 没有直接访问 tracker,我们通过全局状态获取
+			// 这里需要一个全局的 tracker 引用或者通过参数传递
+			// 暂时先用简单的显示,后面优化
+			
 			fmt.Printf("\r进度: [%-45s] %.1f%% (%d/%d) 可用: %d",
 				strings.Repeat("=", int(pct/2))+">",
 				pct,

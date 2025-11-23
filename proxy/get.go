@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/55gY/subs-check/config"
@@ -38,6 +39,48 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 	failedSubsChan := make(chan string, len(subUrls))                      // 收集失败的订阅链接
 	successSubsChan := make(chan string, len(subUrls))                     // 收集成功的订阅链接
 
+	// 订阅获取进度统计
+	var completedTotal, failedTotal, successTotal atomic.Int32
+	
+	// 辅助函数：标记成功
+	markSuccess := func(url string) {
+		successSubsChan <- url
+		successTotal.Add(1)
+	}
+	
+	// 辅助函数：标记失败
+	markFailed := func(url string) {
+		failedSubsChan <- url
+		failedTotal.Add(1)
+	}
+
+	// 启动进度显示(如果配置开启)
+	progressDone := make(chan struct{})
+	if config.GlobalConfig.PrintProgress {
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ticker.C:
+					completed := completedTotal.Load()
+					failed := failedTotal.Load()
+					success := successTotal.Load()
+					pct := float64(completed) / float64(len(subUrls)) * 100
+					fmt.Printf("\r订阅获取: [%-45s] %.1f%% (%d/%d) 成功:%d 失败:%d",
+						strings.Repeat("=", int(pct/2))+">",
+						pct,
+						completed,
+						len(subUrls),
+						success,
+						failed)
+				}
+			}
+		}()
+	}
+
 	// 启动收集结果的协程
 	var mihomoProxies []map[string]any
 	done := make(chan struct{})
@@ -56,12 +99,13 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 		go func(url string) {
 			defer wg.Done()
 			defer func() { <-concurrentLimit }() // 释放令牌
+			defer completedTotal.Add(1)
 
 			data, err := GetDateFromSubs(url)
 			if err != nil {
 				slog.Error(fmt.Sprintf("获取订阅链接错误跳过: %v", err))
 				// 记录失败的订阅链接
-				failedSubsChan <- url
+				markFailed(url)
 				return
 			}
 
@@ -200,6 +244,13 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 	close(proxyChan)
 	close(failedSubsChan)
 	close(successSubsChan)
+	
+	// 关闭进度显示
+	if config.GlobalConfig.PrintProgress {
+		close(progressDone)
+		fmt.Println() // 换行
+	}
+	
 	<-done // 等待收集完成
 
 	// 收集失败和成功的订阅链接
