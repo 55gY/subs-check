@@ -53,11 +53,6 @@ type Config struct {
 	AppriseApiServer     string   `yaml:"apprise-api-server"`
 	RecipientUrl         []string `yaml:"recipient-url"`
 	NotifyTitle          string   `yaml:"notify-title"`
-	SubStorePort         string   `yaml:"sub-store-port"`
-	SubStorePath         string   `yaml:"sub-store-path"`
-	SubStoreSyncCron     string   `yaml:"sub-store-sync-cron"`
-	SubStorePushService  string   `yaml:"sub-store-push-service"`
-	SubStoreProduceCron  string   `yaml:"sub-store-produce-cron"`
 	MihomoOverwriteUrl   string   `yaml:"mihomo-overwrite-url"`
 	MediaCheck           bool     `yaml:"media-check"`
 	Platforms            []string `yaml:"platforms"`
@@ -158,7 +153,8 @@ func RemoveSubUrl(configPath, subUrl string) error {
 	}
 
 	// 写入更新后的配置
-	newContent := strings.Join(newLines, "\n")
+	newContent := strings.Join(newLines, "
+")
 	if err := os.WriteFile(configPath, []byte(newContent), 0644); err != nil {
 		return fmt.Errorf("保存配置文件失败: %w", err)
 	}
@@ -230,7 +226,8 @@ func WriteFailureRecord(records map[string]int) error {
 	
 	// 写入记录
 	for url, count := range records {
-		fmt.Fprintf(file, "%s|%d|%s\n", url, count, "")
+		fmt.Fprintf(file, "%s|%d|%s
+", url, count, "")
 	}
 	
 	return nil

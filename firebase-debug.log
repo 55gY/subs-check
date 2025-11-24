@@ -1,0 +1,30 @@
+[debug] [2025-11-24T01:24:35.495Z] ----------------------------------------------------------------------
+[debug] [2025-11-24T01:24:35.501Z] Command:       /nix/store/ws50yvm6vzlzf7jzz6n7xh4szddrack1-nodejs-20.19.1/bin/node /nix/store/12bms99s479knhxggq0wrjfch7rhy26s-firebase-tools-14.24.1/lib/node_modules/firebase-tools/lib/bin/firebase.js init hosting
+[debug] [2025-11-24T01:24:35.502Z] CLI Version:   14.24.1
+[debug] [2025-11-24T01:24:35.502Z] Platform:      linux
+[debug] [2025-11-24T01:24:35.503Z] Node Version:  v20.19.1
+[debug] [2025-11-24T01:24:35.503Z] Time:          Mon Nov 24 2025 01:24:35 GMT+0000 (Coordinated Universal Time)
+[debug] [2025-11-24T01:24:35.504Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-11-24T01:24:35.514Z] No OAuth tokens found
+[debug] [2025-11-24T01:24:35.515Z] No OAuth tokens found
+[error] Failed to fetch Firebase Project from current Studio Workspace: Unable to refresh auth: not yet authenticated.
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  /home/user/subs-check
+
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] 
+[info] i  If you want to create a project in a Google Cloud organization or folder, please use "firebase projects:create" instead, and return to this command when you've created the project. 
+[debug] [2025-11-24T01:24:58.119Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/userinfo.email"]
