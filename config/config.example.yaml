@@ -55,6 +55,9 @@ node-type:
   # - vmess
   # - vless
 
+# 节点名称筛选，支持正则表达式，会覆盖上面的协议筛选
+filter-regex: ""
+
 # 是否开启流媒体检测，其中IP欺诈依赖重命名
 media-check: false
 platforms:
@@ -102,6 +105,11 @@ recipient-url:
 # 自定义通知标题
 notify-title: "🔔 节点状态更新"
 
+# mihomo API 地址，用于更新订阅(需要重启生效)
+mihomo-api-url: ""
+# mihomo API 密钥(需要重启生效)
+mihomo-api-secret: ""
+
 
 # 覆写订阅的url，这个的作用是生成带指定规则的mihomo/clash.meta订阅链接
 # 防止网络不好，所以现在内置，依赖:8199端口
@@ -125,7 +133,7 @@ github-token: ""
 github-api-mirror: ""
 
 # 将测速结果推送到Worker的地址
-worker-url: https://example.worker.dev
+worker-url: https://example.com/worker.dev
 # Worker令牌
 worker-token: 1234567890
 

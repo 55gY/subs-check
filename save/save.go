@@ -2,14 +2,11 @@ package save
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 
 	"github.com/55gY/subs-check/check"
 	"github.com/55gY/subs-check/config"
 	"github.com/55gY/subs-check/save/method"
-	"github.com/55gY/subs-check/utils"
 	"gopkg.in/yaml.v3"
 )
 
