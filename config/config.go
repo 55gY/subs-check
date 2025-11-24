@@ -153,8 +153,7 @@ func RemoveSubUrl(configPath, subUrl string) error {
 	}
 
 	// 写入更新后的配置
-	newContent := strings.Join(newLines, "
-")
+	newContent := strings.Join(newLines, "\n")
 	if err := os.WriteFile(configPath, []byte(newContent), 0644); err != nil {
 		return fmt.Errorf("保存配置文件失败: %w", err)
 	}
@@ -226,8 +225,7 @@ func WriteFailureRecord(records map[string]int) error {
 	
 	// 写入记录
 	for url, count := range records {
-		fmt.Fprintf(file, "%s|%d|%s
-", url, count, "")
+		fmt.Fprintf(file, "%s|%d|%s\n", url, count, "")
 	}
 	
 	return nil
