@@ -117,39 +117,8 @@ mihomo-api-secret: ""
 mihomo-overwrite-url: "http://127.0.0.1:8199/sub/ACL4SSR_Online_Full.yaml"
 
 # 保存方法
-# 目前支持的保存方法: r2, local, gist, webdav, s3
+# 目前支持的保存方法: local
 save-method: local
-
-# webdav
-webdav-url: "https://example.com/dav/"
-webdav-username: "admin"
-webdav-password: "admin"
-
-# gist id
-github-gist-id: ""
-# github token
-github-token: ""
-# github api mirror
-github-api-mirror: ""
-
-# 将测速结果推送到Worker的地址
-worker-url: https://example.com/worker.dev
-# Worker令牌
-worker-token: 1234567890
-
-# 将测速结果推送到S3/Minio的地址
-s3-endpoint: "127.0.0.1:9000"
-# S3的访问凭证
-s3-access-id: "ak"
-# S3的秘密密钥
-s3-secret-key: "sk"
-# S3的Bucket名称
-s3-bucket: "public"
-# 是否使用SSL
-s3-use-ssl: false
-# 默认自动判断dns还是path，但一些云厂商不遵循规范，所以有时需要手动设置
-# 可选值：auto, path, dns
-s3-bucket-lookup: "auto"
 
 # 重试次数(获取订阅失败后重试次数)
 sub-urls-retry: 3

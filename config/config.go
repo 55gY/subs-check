@@ -23,20 +23,6 @@ type Config struct {
 	Timeout              int      `yaml:"timeout"`
 	FilterRegex          string   `yaml:"filter-regex"`
 	SaveMethod           string   `yaml:"save-method"`
-	WebDAVURL            string   `yaml:"webdav-url"`
-	WebDAVUsername       string   `yaml:"webdav-username"`
-	WebDAVPassword       string   `yaml:"webdav-password"`
-	GithubToken          string   `yaml:"github-token"`
-	GithubGistID         string   `yaml:"github-gist-id"`
-	GithubAPIMirror      string   `yaml:"github-api-mirror"`
-	WorkerURL            string   `yaml:"worker-url"`
-	WorkerToken          string   `yaml:"worker-token"`
-	S3Endpoint           string   `yaml:"s3-endpoint"`
-	S3AccessID           string   `yaml:"s3-access-id"`
-	S3SecretKey          string   `yaml:"s3-secret-key"`
-	S3Bucket             string   `yaml:"s3-bucket"`
-	S3UseSSL             bool     `yaml:"s3-use-ssl"`
-	S3BucketLookup       string   `yaml:"s3-bucket-lookup"`
 	SubUrlsReTry         int      `yaml:"sub-urls-retry"`
 	SubUrlsRetryInterval int      `yaml:"sub-urls-retry-interval"`
 	SubUrlsTimeout       int      `yaml:"sub-urls-timeout"`
