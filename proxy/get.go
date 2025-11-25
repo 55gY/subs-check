@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/55gY/subs-check/config"
-	"github.com/55gY/subs-check/utils"
 	"github.com/metacubex/mihomo/common/convert"
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v3"
