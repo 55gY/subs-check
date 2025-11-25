@@ -389,31 +389,16 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 	}
 
 	// 处理GitHub代理
-	if (strings.Contains(normalizedURL, "github.com") || strings.Contains(normalizedURL, "raw.githubusercontent.com")) && config.GlobalConfig.GithubProxy != nil {
+	if (strings.Contains(normalizedURL, "github.com") || strings.Contains(normalizedURL, "raw.githubusercontent.com")) && config.GlobalConfig.GithubProxy != "" {
 		// 处理单个代理字符串或代理列表
-		switch v := config.GlobalConfig.GithubProxy.(type) {
-		case string:
-			// 单个代理字符串
-			if v != "" {
-				proxyUrl := strings.TrimSuffix(v, "/")
-				// 确保代理URL有协议头
-				if !strings.HasPrefix(proxyUrl, "http://") && !strings.HasPrefix(proxyUrl, "https://") {
-					proxyUrl = "https://" + proxyUrl
-				}
-				urlsToTry = append(urlsToTry, proxyUrl+"/"+normalizedURL)
+		v := config.GlobalConfig.GithubProxy
+		if v != "" {
+			proxyUrl := strings.TrimSuffix(v, "/")
+			// 确保代理URL有协议头
+			if !strings.HasPrefix(proxyUrl, "http://") && !strings.HasPrefix(proxyUrl, "https://") {
+				proxyUrl = "https://" + proxyUrl
 			}
-		case []interface{}:
-			// 代理列表
-			for _, proxy := range v {
-				if proxyStr, ok := proxy.(string); ok && proxyStr != "" {
-					proxyUrl := strings.TrimSuffix(proxyStr, "/")
-					// 确保代理URL有协议头
-					if !strings.HasPrefix(proxyUrl, "http://") && !strings.HasPrefix(proxyUrl, "https://") {
-						proxyUrl = "https://" + proxyUrl
-					}
-					urlsToTry = append(urlsToTry, proxyUrl+"/"+normalizedURL)
-				}
-			}
+			urlsToTry = append(urlsToTry, proxyUrl+"/"+normalizedURL)
 		}
 	}
 
