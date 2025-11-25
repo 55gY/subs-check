@@ -161,7 +161,29 @@ remove-failed-sub-retry: 3
 sub-urls-get-ua: "clash.meta"
 # Github Proxy，获取订阅使用，结尾要带的 /
 # github-proxy: "https://ghfast.top/"
-github-proxy: "https://ghfast.top/"
+github-proxy: 
+  - https://ghfast.top/
+  - https://github.intellisensing.tech/
+  - https://ghproxy.wjsphy.top/
+  - https://githubacc.caiaiwan.com/
+  - https://l0l0l.cc/
+  - https://cdn-gh.141888.xyz/
+  - https://ghjs.131412.eu.org/
+  - https://gh.dev.438250.xyz/
+  - https://git-clone.ccrui.dev/
+  - https://b.yesican.top/
+  - https://hub.why-ing.top/
+  - https://q-github.cnxiaobai.com/
+  - https://g.108964.xyz/
+  - https://git.maomao.ovh/
+  - https://git.llvho.com/
+  - https://ghp.opendatahub.xyz/
+  - https://privateghproxy.iil.im/
+  - https://gh.mtx72.cc/
+  - https://git.loushi.site/
+  - https://ghproxy.gopher.ink/
+  - https://gh.tou.lu/
+  - https://gh.aurzex.top/
 # 此参数更通用，适用于拉取代理、消息推送、文件上传等等
 # 写法跟环境变量一样。修改需重启生效
 # proxy: "http://username:password@192.168.1.1:7890"

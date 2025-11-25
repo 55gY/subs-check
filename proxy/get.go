@@ -252,7 +252,7 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					proxyChan <- proxyMap
 				}
 			}
-		}(utils.WarpUrl(subUrl))
+		}(subUrl)
 	}
 
 	// 等待所有工作协程完成
@@ -297,7 +297,7 @@ func resolveSubUrls() ([]string, int, int) {
 	// 远程清单
 	if len(config.GlobalConfig.SubUrlsRemote) != 0 {
 		for _, d := range config.GlobalConfig.SubUrlsRemote {
-			if remote, err := fetchRemoteSubUrls(utils.WarpUrl(d)); err != nil {
+			if remote, err := fetchRemoteSubUrls(d); err != nil {
 				slog.Warn("获取远程订阅清单失败，已忽略", "err", err)
 			} else {
 				remoteNum += len(remote)
@@ -374,6 +374,23 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 	}
 	var lastErr error
 
+	// 检查是否是GitHub链接，如果是则尝试使用代理
+	var urlsToTry []string
+	if strings.Contains(subUrl, "github.com") && len(config.GlobalConfig.GithubProxy) > 0 {
+		// 为每个代理URL创建一个完整的URL
+		for _, proxy := range config.GlobalConfig.GithubProxy {
+			if proxy != "" {
+				proxyUrl := strings.TrimSuffix(proxy, "/")
+				urlsToTry = append(urlsToTry, proxyUrl+"/"+subUrl)
+			}
+		}
+		// 添加原始URL作为最后的备选
+		urlsToTry = append(urlsToTry, subUrl)
+	} else {
+		// 非GitHub链接直接使用原始URL
+		urlsToTry = []string{subUrl}
+	}
+
 	client := &http.Client{
 		Timeout: time.Duration(timeout) * time.Second,
 		Transport: &http.Transport{
@@ -389,43 +406,54 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 		},
 	}
 
-	for i := 0; i < maxRetries; i++ {
-		if i > 0 {
-			time.Sleep(time.Duration(retryInterval) * time.Second)
-		}
+	// 尝试每个URL
+	for _, url := range urlsToTry {
+		slog.Debug("尝试获取订阅", "url", url)
 
-		req, err := http.NewRequest("GET", subUrl, nil)
-		if err != nil {
-			lastErr = err
-			continue
-		}
+		// 对每个URL进行重试
+		for i := 0; i < maxRetries; i++ {
+			if i > 0 {
+				time.Sleep(time.Duration(retryInterval) * time.Second)
+			}
 
-		if config.GlobalConfig.SubUrlsGetUA == "random" {
-			req.Header.Set("User-Agent", convert.RandUserAgent())
-		} else {
-			req.Header.Set("User-Agent", config.GlobalConfig.SubUrlsGetUA)
-		}
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				lastErr = err
+				continue
+			}
 
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			lastErr = fmt.Errorf("订阅链接: %s 返回状态码: %d", subUrl, resp.StatusCode)
-			continue
-		}
+			if config.GlobalConfig.SubUrlsGetUA == "random" {
+				req.Header.Set("User-Agent", convert.RandUserAgent())
+			} else {
+				req.Header.Set("User-Agent", config.GlobalConfig.SubUrlsGetUA)
+			}
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			lastErr = fmt.Errorf("读取订阅链接: %s 数据错误: %v", subUrl, err)
-			continue
+			resp, err := client.Do(req)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				lastErr = fmt.Errorf("订阅链接: %s 返回状态码: %d", url, resp.StatusCode)
+				continue
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				lastErr = fmt.Errorf("读取订阅链接: %s 数据错误: %v", url, err)
+				continue
+			}
+
+			// 如果使用代理成功，记录日志
+			if url != subUrl {
+				slog.Info("使用代理成功获取订阅", "url", subUrl, "proxy", url)
+			}
+			return body, nil
 		}
-		return body, nil
 	}
 
-	return nil, fmt.Errorf("重试%d次后失败: %v", maxRetries, lastErr)
+	return nil, fmt.Errorf("所有URL尝试%d次后失败: %v", maxRetries, lastErr)
 }
 
 func extractV2RayLinks(data []byte) []string {
