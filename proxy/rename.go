@@ -15,7 +15,8 @@ func Rename(name string) string {
 	defer counterLock.Unlock()
 
 	counter[name]++
-	return CountryCodeToFlag(name) + name + "_" + strconv.Itoa(counter[name])
+	// return CountryCodeToFlag(name) + name + "_" + strconv.Itoa(counter[name])
+	return name + "_" + strconv.Itoa(counter[name])
 
 }
 
