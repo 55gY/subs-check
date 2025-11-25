@@ -12,11 +12,8 @@ var (
 )
 
 func Rename(name, countryCodeTag string) string {
-	// 添加调试输出
-	slog.Debug("Rename函数输入", "name", name, "countryCodeTag", countryCodeTag)
 
 	flag := CountryCodeToFlag(name)
-	slog.Debug("CountryCodeToFlag返回", "flag", flag)
 
 	key, label := name, name
 	// 如果节点名称包含CN，则丢弃该节点
