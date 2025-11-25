@@ -2,7 +2,6 @@ package proxies
 
 import (
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -11,23 +10,13 @@ var (
 	counterLock = sync.Mutex{}
 )
 
-func Rename(name, countryCodeTag string) string {
-
-	flag := CountryCodeToFlag(name)
-
-	key, label := name, name
-	// 如果节点名称包含CN，则丢弃该节点
-	if strings.Contains(strings.ToUpper(name), "CN") {
-		return ""
-	}
-
+func Rename(name string) string {
 	counterLock.Lock()
 	defer counterLock.Unlock()
 
-	counter[key]++
-	n := counter[key]
+	counter[name]++
+	return CountryCodeToFlag(name) + name + "_" + strconv.Itoa(counter[name])
 
-	return flag + label + "_" + strconv.Itoa(n)
 }
 
 // ResetRenameCounter 将所有计数器重置为 0
@@ -40,7 +29,7 @@ func ResetRenameCounter() {
 
 func CountryCodeToFlag(code string) string {
 	if len(code) != 2 {
-		return "🏴‍☠"
+		return "❓Other"
 	}
 
 	code = string([]rune(code)[0]&^0x20) + string([]rune(code)[1]&^0x20) // 转成大写（ASCII 位运算）

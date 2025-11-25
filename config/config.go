@@ -23,6 +23,20 @@ type Config struct {
 	Timeout              int      `yaml:"timeout"`
 	FilterRegex          string   `yaml:"filter-regex"`
 	SaveMethod           string   `yaml:"save-method"`
+	WebDAVURL            string   `yaml:"webdav-url"`
+	WebDAVUsername       string   `yaml:"webdav-username"`
+	WebDAVPassword       string   `yaml:"webdav-password"`
+	GithubToken          string   `yaml:"github-token"`
+	GithubGistID         string   `yaml:"github-gist-id"`
+	GithubAPIMirror      string   `yaml:"github-api-mirror"`
+	WorkerURL            string   `yaml:"worker-url"`
+	WorkerToken          string   `yaml:"worker-token"`
+	S3Endpoint           string   `yaml:"s3-endpoint"`
+	S3AccessID           string   `yaml:"s3-access-id"`
+	S3SecretKey          string   `yaml:"s3-secret-key"`
+	S3Bucket             string   `yaml:"s3-bucket"`
+	S3UseSSL             bool     `yaml:"s3-use-ssl"`
+	S3BucketLookup       string   `yaml:"s3-bucket-lookup"`
 	SubUrlsReTry         int      `yaml:"sub-urls-retry"`
 	SubUrlsRetryInterval int      `yaml:"sub-urls-retry-interval"`
 	SubUrlsTimeout       int      `yaml:"sub-urls-timeout"`
@@ -39,6 +53,11 @@ type Config struct {
 	AppriseApiServer     string   `yaml:"apprise-api-server"`
 	RecipientUrl         []string `yaml:"recipient-url"`
 	NotifyTitle          string   `yaml:"notify-title"`
+	SubStorePort         string   `yaml:"sub-store-port"`
+	SubStorePath         string   `yaml:"sub-store-path"`
+	SubStoreSyncCron     string   `yaml:"sub-store-sync-cron"`
+	SubStorePushService  string   `yaml:"sub-store-push-service"`
+	SubStoreProduceCron  string   `yaml:"sub-store-produce-cron"`
 	MihomoOverwriteUrl   string   `yaml:"mihomo-overwrite-url"`
 	MediaCheck           bool     `yaml:"media-check"`
 	Platforms            []string `yaml:"platforms"`
@@ -47,7 +66,7 @@ type Config struct {
 	NodeType             []string `yaml:"node-type"`
 	EnableWebUI          bool     `yaml:"enable-web-ui"`
 	APIKey               string   `yaml:"api-key"`
-	GithubProxy          interface{} `yaml:"github-proxy"`
+	GithubProxy          string   `yaml:"github-proxy"`
 	Proxy                string   `yaml:"proxy"`
 	CallbackScript       string   `yaml:"callback-script"`
 	RemoveFailedSubRetry int      `yaml:"remove-failed-sub-retry"`

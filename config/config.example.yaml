@@ -2,17 +2,17 @@
 print-progress: true
 
 # 并发线程数
-concurrent: 1000
+concurrent: 20
 # 检查间隔(分钟)
 # 必须大于0，小于等于0会设置间隔1分钟
-# check-interval: 120
+check-interval: 120
 # cron表达式，如果配置了此项，将忽略check-interval
 # 支持标准cron表达式，如：
 # "0 */2 * * *" 表示每2小时的整点执行
 # "0 0 */2 * *" 表示每2天的0点执行
 # "0 0 1 * *" 表示每月1日0点执行
 # "*/30 * * * *" 表示每30分钟执行一次
-cron-expression: "0 */4 * * *"
+# cron-expression: "*/30 * * * *"
 
 # 保存几个成功的节点，为0代表不限制 
 # 如果你的并发数量超过这个参数，那么成功的结果可能会大于这个数值
@@ -20,24 +20,20 @@ cron-expression: "0 */4 * * *"
 success-limit: 0
 
 # 超时时间(毫秒)(节点的最大延迟)
-timeout: 10000
+timeout: 1000
 # 延迟测试URL
 # 一些高级用法需要自己摸索，比如想要拒绝某些CF类节点，可将url替换为https://www.cloudflare.com
-# alive-test-url: http://gstatic.com/generate_204
-alive-test-url: http://captive.apple.com/
+alive-test-url: http://gstatic.com/generate_204
 # 测速地址(注意 并发数*节点速度<最大网速 否则测速结果不准确)
 # 尽量不要使用Speedtest，Cloudflare提供的下载链接，因为很多节点屏蔽测速网站
 # 如果找不到稳定的测速地址，可以自建测速地址
-# enable-speedtest: false
-# speed-test-url: https://github.com/AaronFeng753/Waifu2x-Extension-GUI/releases/download/v2.21.12/Waifu2x-Extension-GUI-v2.21.12-Portable.7z
-# speed-test-url: http://sgp.download.datapacket.com/100mb.bin
-speed-test-url: https://speed.cloudflare.com/__down?during=download&bytes=104857600
+speed-test-url: https://github.com/AaronFeng753/Waifu2x-Extension-GUI/releases/download/v2.21.12/Waifu2x-Extension-GUI-v2.21.12-Portable.7z
 # 最低测速结果舍弃(KB/s)
-min-speed: 100
+min-speed: 512
 # 下载测试时间(s)(与下载链接大小相关，默认最大测试10s)
-download-timeout: 5
+download-timeout: 10
 # 单节点测速下载数据大小(MB)限制，0为不限
-download-mb: 10
+download-mb: 20
 # 总下载速度速度限制(MB/s)，0为不限
 total-speed-limit: 0
 
@@ -46,6 +42,7 @@ total-speed-limit: 0
 # 注意：为方便小白默认监听0.0.0.0:8199，请自行修改
 # 更新需重启程序
 listen-port: ":8199"
+
 # 以节点IP查询位置重命名节点
 # 质量差的节点可能造成IP查询失败，造成整体检查速度稍微变慢，默认true
 rename-node: true
@@ -110,9 +107,7 @@ notify-title: "🔔 节点状态更新"
 # :8299 任何可以访问到服务器的设备（包括本机和远程设备）,系统会默认绑定到所有可用 IPv4 地址
 # 127.0.0.1:8299  仅限本机。远程设备无法连接
 # 0.0.0.0:8299  任何可以访问到服务器的设备（包括本机和远程设备）。所有 IPv4 地址
-# sub-store-port: "127.0.0.1:8299"
-# 不启用substore
-sub-store-port: ""
+sub-store-port: "127.0.0.1:8299"
 # sub-store自定义访问路径，必须以/开头，后续访问订阅也要带上此路径
 # 设置path之后，还可以开启订阅分享功能，无需暴露真实的path
 # sub-store-path: "/path"
@@ -143,51 +138,55 @@ mihomo-overwrite-url: "http://127.0.0.1:8199/sub/ACL4SSR_Online_Full.yaml"
 # 目前支持的保存方法: r2, local, gist, webdav, s3
 save-method: local
 
+# webdav
+webdav-url: "https://example.com/dav/"
+webdav-username: "admin"
+webdav-password: "admin"
+
+# gist id
+github-gist-id: ""
+# github token
+github-token: ""
+# github api mirror
+github-api-mirror: ""
+
+# 将测速结果推送到Worker的地址
+worker-url: https://example.worker.dev
+# Worker令牌
+worker-token: 1234567890
+
+# 将测速结果推送到S3/Minio的地址
+s3-endpoint: "127.0.0.1:9000"
+# S3的访问凭证
+s3-access-id: "ak"
+s3-secret-key: "sk"
+# S3的Bucket名称
+s3-bucket: "public"
+# 是否使用SSL
+s3-use-ssl: false
+# 默认自动判断dns还是path，但一些云厂商不遵循规范，所以有时需要手动设置
+# 可选值：auto, path, dns
+s3-bucket-lookup: "auto"
+
 # 重试次数(获取订阅失败后重试次数)
-sub-urls-retry: 5
+sub-urls-retry: 3
 # 重试间隔(秒)
-sub-urls-retry-interval: 2
+sub-urls-retry-interval: 1
 # 订阅链接超时时间(秒)
-sub-urls-timeout: 60
-# remove-failed-sub-retry订阅链接失败重试次数
+sub-urls-timeout: 10
+# 订阅链接失败重试次数
 # 控制订阅链接获取失败后的处理策略：
 # > 0: 启用智能重试机制，失败N次后才删除订阅链接（推荐：3-5）
 # = 0: 失败1次就立即删除订阅链接
 # < 0: 永不删除失败的订阅链接（默认：-1）
 # 注意：删除操作会保留配置文件中的注释和格式
-remove-failed-sub-retry: 3
+remove-failed-sub-retry: -1
 # 获取订阅时使用的UA；如果设置random将会使用随机UA获取订阅
 # sub-urls-get-ua: "random"
 sub-urls-get-ua: "clash.meta"
 # Github Proxy，获取订阅使用，结尾要带的 /
-# Github Proxy，获取订阅使用，结尾要带的 /
-# 支持单个代理或代理列表
-github-proxy: "https://ghfast.top/"
-
-# 或者使用代理列表
-# github-proxy: 
-  # - https://ghfast.top/
-  # - https://github.intellisensing.tech/
-  # - https://ghproxy.wjsphy.top/
-  # - https://githubacc.caiaiwan.com/
-  # - https://l0l0l.cc/
-  # - https://cdn-gh.141888.xyz/
-  # - https://ghjs.131412.eu.org/
-  # - https://gh.dev.438250.xyz/
-  # - https://git-clone.ccrui.dev/
-  # - https://b.yesican.top/
-  # - https://hub.why-ing.top/
-  # - https://q-github.cnxiaobai.com/
-  # - https://g.108964.xyz/
-  # - https://git.maomao.ovh/
-  # - https://git.llvho.com/
-  # - https://ghp.opendatahub.xyz/
-  # - https://privateghproxy.iil.im/
-  # - https://gh.mtx72.cc/
-  # - https://git.loushi.site/
-  # - https://ghproxy.gopher.ink/
-  # - https://gh.tou.lu/
-  # - https://gh.aurzex.top/
+# github-proxy: "https://ghfast.top/"
+github-proxy: ""
 # 此参数更通用，适用于拉取代理、消息推送、文件上传等等
 # 写法跟环境变量一样。修改需重启生效
 # proxy: "http://username:password@192.168.1.1:7890"
@@ -201,17 +200,9 @@ success-rate: 0
 # 2) YAML/JSON：字符串数组 ["https://...", "https://..."]
 # 支持时间占位符与 github-proxy，例如包含 {Ymd}、{Y-m-d}
 sub-urls-remote:
-    - https://raw.githubusercontent.com/sinspired/airport/main/subs/merged/col.txt
-    - https://raw.githubusercontent.com/sinspired/airport/main/subs/merged/cm.txt
-    - https://raw.githubusercontent.com/sinspired/airport/main/subs/merged/scan.txt
-    - https://raw.githubusercontent.com/liketolivefree/kobabi/main/clash_mt_ir_prov_l.yaml
-    - https://raw.githubusercontent.com/liketolivefree/kobabi/main/clash_mt_ir_prov_l2.yaml
-    - https://raw.githubusercontent.com/liketolivefree/kobabi/main/clash_mt_ir_prov_f.yaml
-    - https://raw.githubusercontent.com/liketolivefree/kobabi/main/clash_mt_ir_prov_f2.yaml
-    - https://raw.githubusercontent.com/liketolivefree/kobabi/main/clash_mt_ir_prov_spr.yaml
   # - https://example.com/sub-list.txt
   # - https://example.com/sub-list.yaml
-  # - https://raw.githubusercontent.com/beck-8/sub-urls/main/%E5%B0%8F%E8%80%8C%E7%BE%8E.txt
+  # - https://raw.githubusercontent.com/55gY/sub-urls/main/%E5%B0%8F%E8%80%8C%E7%BE%8E.txt
 
 # 订阅地址 支持 clash/mihomo/v2ray/base64 格式的订阅链接
 # 如果用户想明确使用clash类型，那可以在支持的订阅链接结尾加上 &flag=clash.meta
@@ -227,123 +218,29 @@ sub-urls:
   # - https://example.com/sub.txt#我是备注我是备注
   # 打开这个就可以把上次可用的节点再次测一次
   # - "http://127.0.0.1:8199/sub/all.yaml"
-    - "http://127.0.0.1:8199/sub/all.yaml"
-    - https://raw.githubusercontent.com/firefoxmmx2/v2rayshare_subcription/main/subscription/clash_sub.yaml
-    - https://raw.githubusercontent.com/Q3dlaXpoaQ/V2rayN_Clash_Node_Getter/main/APIs/sc0.yaml
-    - https://raw.githubusercontent.com/xiaoji235/airport-free/main/clash/naidounode.txt
-    - https://raw.githubusercontent.com/mahdibland/SSAggregator/master/sub/sub_merge_yaml.yml
-    - https://raw.githubusercontent.com/snakem982/proxypool/main/source/clash-meta.yaml
-    - https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.yml
-    - https://raw.githubusercontent.com/zhangkaiitugithub/passcro/main/speednodes.yaml
-    - https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/README.md
-    - https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/snippets/nodes.meta.yml
-    - https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.meta.yml
-    - https://raw.githubusercontent.com/anaer/Sub/main/clash.yaml
-    - https://raw.githubusercontent.com/free18/v2ray/main/c.yaml
-    - https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.yml
-    - https://raw.githubusercontent.com/Ruk1ng001/freeSub/main/clash.yaml
-    - https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/main/all_configs.txt
-    - https://raw.githubusercontent.com/ripaojiedian/freenode/main/clash
-    - https://raw.githubusercontent.com/go4sharing/sub/main/sub.yaml
-    - https://raw.githubusercontent.com/actionsfz/v2ray/master/all.yaml
-    - https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub
-    - https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2
-    - https://raw.githubusercontent.com/acymz/AutoVPN/main/data/V2.txt
-    - https://raw.githubusercontent.com/ggborr/FREEE-VPN/main/6V2ray
-    - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/wenode.txt
-    - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/v2rayshare.txt
-    - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/nodefree.txt
-    - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/ndnode.txt
-    - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/clashmeta.txt
-    - https://raw.githubusercontent.com/xiaoji235/airport-free/main/v2ray/v2rayshare.txt
-    - https://raw.githubusercontent.com/xiaoji235/airport-free/main/v2ray.txt
-    - https://gist.githubusercontent.com/shaoyouvip/9dc3d23482fdc4a19e407a7e944782b8/raw/base64.txt#shaoyouvip
-    - https://cdn.z.wiki/autoupload/20250401/BVfz/%E6%96%87%E6%9C%AC.txt#stymei1
-    - https://sub666.yydzx.xyz/sub/b0ac0ebd074e06e9/clash#瑶瑶领先
-    - https://sub666.yydzx.xyz/sub/d6854b3ce66efd90/clash
-    - https://wgabcs.lobonet.cn/mdet/wdfs/heuy/?token=6bb917dd1326e17a335232bc98af1188
-    - http://8.218.248.238:25555/s/ba05d4d71bbd365a54b2a887b513b903#Seele Cloud
-    - http://xtd68.xttyun-a.men:8970/xt/d/4751a60dd0dae501e3a83820f4ecc0b2
-    - https://wgabcs.lobonet.cn/mdet/wdfs/heuy/?token=7f7d9ac3ed7105a1aa47b05ef5fbd3bd
-    - https://app.nextvpn.xyz/api/sub/c0ea398d509d1536367199a64cd5828101f975eb
-    - https://ylks.tt2000.sbs/2025/d7/b18/v.txt
-    - https://zjzl.wxgqlfx.fun/wxgqlfx
-    - https://rss.zyfx6.xyz/v2rayNG/
-    - https://rss.zyfx6.xyz/clash/
-    - https://shz.al/e2wT
-    - https://raw.kkgithub.com/WeiGiegie/vpm/main/lq.snippet#GieGie444
-    - https://raw.kkgithub.com/ripaojiedian/freenode/main/clash#ripaojiedian
-    - https://xship.top/v1/subscribe?starlink=WPP4xfgfnIcRE7RqFmC0kCDE#xship
-    - https://raw.kkgithub.com/zhangkaiitugithub/passcro/main/speednodes.yaml
-    - https://raw.kkgithub.com/snakem982/proxypool/main/source/clash-meta.yaml
-    - https://ghfile.geekertao.top/https://github.com/PuddinCat/BestClash/blob/main/proxies.yaml
-    - https://9770f00d98e.bigbigwatermelon.com/s?token=88de1c90040e05cacee60658f5512c11#MistNet
-    - https://sub.danhu.ddns-ip.net/paste/B251018W1E9KS5Im/clash#蛋黄酱
-    - https://dingyue.xlw.app/https://qd.xlw.app/s/4a172f51d79bef2d000f246a65589870#仙路湾
-    - https://subhead.niceex.xyz/https://sub.niceex.xyz/s/c80e0e418de3c28b102574ac63b4c92a#Nice
-    - https://sub2.sunglow.cfd/jiangjiang?token=1e87cf0893530799e3d3d6aa68fb72bc#酱酱
-    - https://sub.duffy.baby/api/v1/client/subscribe?token=c57d94cceaeb1de89a9daa644b1359e7#达菲云
-    - https://sub609.999398.xyz/JWl8MsV8XY4TYi0W2A0W/c6235b9c691ee5e88e2e4956f753e1d2#木木云
-    - https://sub.xuwuge.xyz/xuwuge/102f14e2ad0690a37a9b524c4a09f31c#虚无阁
-    - https://s.hahajime.top/s?token=5e76d614b4188f67aa67323972a1216a#哈基米
-    - https://sub-1.xn--94q57lcvpw50b.cc/mfjc/5707c482e8befda3448d83ea22da1844#时长两年半
-    - https://sub.dmit.dpdns.org/share/sub/dingyue_Center_zijian_auto?token=xgy1nCsG7xgerdecv4QRn
-    - https://api.liltjay.ip-ddns.com/TQWMYCWH2D
-    - https://sub.zyfx6.xyz/share/file/%E6%B0%B8%E4%B9%85%E8%AE%A2%E9%98%85%40txwl666?token=clash
-    - https://subbeta.775678.xyz/sub?uuid=f64bdc57-0f54-4705-bf75-cfd646d98c06&encryption=none&security=tls&sni=snippets.mnmnm.netlib.re&fp=firefox&allowInsecure=1&type=ws&host=snippets.mnmnm.netlib.re&path=%2F%3Fed%3D2560
-    - https://raw.kkgithub.com/ripaojiedian/freenode/main/clash
-    - https://raw.kkgithub.com/Jsnzkpg/Jsnzkpg/Jsnzkpg/Jsnzkpg
-    - https://peige.dpkj.qzz.io/dapei
-    - https://raw.kkgithub.com/igeekshare/GeekshareFreeNode/main/clash/Geekshare.yaml
-    - https://sub3.sunglow.cfd/jiangjiang?token=146143a122b8181a65f84ca56778d950
-    - https://dyzk.020318.xyz/?token=d24404a213fc4dd681536826c509e0a1&amp%3Bflag=clash
-    - https://xuinibuhuizhenxinleba.v2bp.rest/zuihaodev2/c70cec7af209cc8dd162d65c689c5e96
-    - https://aa.wanfeng88.top/c/4PfqsB2
-    - https://s1.byte33.com/api/v1/client/subscribe?token=d104bfd507d33ae78a8c7c50a2c143d2
-    - https://1821.nginx24ppy.xyz/link/kySLStKTpSimjajb?clash=1
-    - https://img.ezyun.org/public?token=f19286d48578ad3fe6e130662e1cc2af
-    - https://s3.v2rayse.com/public/20251119/m3e0vok2.yaml
-    - https://sub.dmit.dpdns.org/share/file/dingyue_Center_%20dishu?token=KBGP1xKN5DRwW5xbK9KS-
-    - https://sub.dmit.dpdns.org/share/sub/dingyue_Center_mitce1218?token=AJu9kQ5apItC6zuDYT4Xs
-    - https://shz.al/~@DingyueJiedian8
-    - https://shz.al/bEjR
-    - https://ylks.tt2000.sbs/2025/d7/a19/c.yaml
-    - https://ylks.tt2000.sbs/2025/d7/a19/v.txt
-    - https://shz.al/4sX3
-    - https://img.ezyun.org/public?token=41cb4ee083c6b9efa907b7215ce097c2
-    - https://s3.v2rayse.com/public/20251120/4e5bpb1f.yaml
-    - https://img.ezyun.org/public?token=8e649f8256e976b7ac32e7692a79cd8e
-    - https://app.mitce.net/?sid=372598&token=srvmanju
-    - https://dingyuejd.rockapi.ink/rocket/dingyue?token=4908e9bb28072886cdc42bfac438aecf
-    - http://107.173.178.139:8080/config1.yaml
-    - https://9770f00d98e.bigbigwatermelon.com/s?token=d34c3b8810eeffa4bcb69a0725f3635f
-    - https://s3.v2rayse.com/public/20251121/5fami1vp.yaml
-    - https://s3.v2rayse.com/public/20251122/7wc5x13f.yaml
-    - https://wgabcs.lobonet.cn/mdet/wdfs/heuy/?token=5f40907d115d6782f103f467b35c0fb4
-    - https://raw.kkgithub.com/ripaojiedian/freenode/main/sub
-    - https://zh.momobaby.org/download/clash/efa5524dcc0fe26814b34b249bea3c4b5bb61a8cf169f6d79b01bafffbe20b3b?config_name=Config
-    - https://dy.cakecloud.sbs/cake/55f4b897471f054cc34028e9eb28a8ac
-    - https://shz.al/8xHA
-    - https://shz.al/2Jbk
-    - https://9770f00d98e.bigbigwatermelon.com/s?token=4ab651189ba5cda07c16df404a256448#
-    - https://img.ezyun.org/public?token=9feb19d5b456bc5a8a4575e8c24316f8
-    - https://dy.jgpyjc.top/api/v1/client/subscribe?token=aa6711b7503066c07e0446d74c47c39c
-    - https://hk.allmen.xyz/xfxs/7b806f74f7b38e1f3cd8bd66a4d2c21e
-    - https://dy.jgpyjc.top/api/v1/client/subscribe?token=56f0f7a3293059dc027fe1333139d766
-    - https://sub.scpnb.top/base64
-    - https://ylks.tt2000.sbs/2025/d7/s20/c.yaml
-    - https://ylks.tt2000.sbs/2025/d7/s20/v.txt
-    - https://ylks.tt2000.sbs/2025/d7/s21/c.yaml
-    - https://shz.al/eZm5
-    - https://shz.al/a7mf
-    - https://shz.al/kC5k
-    - https://shz.al/y7Yt
-    - https://xtls.rprx.vision/api/v1/client/subscribe?token=dcb70e51eb7c7373c0ada8028c06309b
-    - https://shz.al/X3cF
-    - https://shz.al/zrF2
-    - https://sub.dmit.dpdns.org/share/sub/dingyue_Center_zyfx6?token=nYOnpm3ex2RfwwgBK9RFY
-    - https://sub.xn--9kqv66eehg.site/s/0cf262b79f333b6e52f02ce5722d5edf
-    - https://dydvehzxk9gea5hcc.subsrr.top/xuexi/study/client/subscribe?token=90b96f48e1b169c7f02fefe77d6c8774
-    - https://shz.al/4Gft
-    - https://shz.al/awpQ
-    - https://shz.al/SbFT
+  - "https://raw.githubusercontent.com/firefoxmmx2/v2rayshare_subcription/main/subscription/clash_sub.yaml"
+  - "https://raw.githubusercontent.com/Q3dlaXpoaQ/V2rayN_Clash_Node_Getter/refs/heads/main/APIs/sc0.yaml"
+  - "https://raw.githubusercontent.com/mahdibland/SSAggregator/master/sub/sub_merge_yaml.yml"
+  - "https://raw.githubusercontent.com/snakem982/proxypool/main/source/clash-meta.yaml"
+  - "https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.yml"
+  - "https://raw.githubusercontent.com/zhangkaiitugithub/passcro/main/speednodes.yaml"
+  - "https://raw.githubusercontent.com/aiboboxx/v2rayfree/refs/heads/main/README.md"
+  - "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/snippets/nodes.meta.yml"
+  - "https://raw.githubusercontent.com/anaer/Sub/refs/heads/main/clash.yaml"
+  - "https://raw.githubusercontent.com/free18/v2ray/refs/heads/main/c.yaml"
+  - "https://raw.githubusercontent.com/Ruk1ng001/freeSub/main/clash.yaml"
+  - "https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/main/all_configs.txt"
+  - "https://raw.githubusercontent.com/ripaojiedian/freenode/main/clash"
+  - "https://raw.githubusercontent.com/go4sharing/sub/main/sub.yaml"
+  - https://raw.githubusercontent.com/actionsfz/v2ray/refs/heads/master/all.yaml
+  - https://raw.githubusercontent.com/Pawdroid/Free-servers/refs/heads/main/sub
+  - https://raw.githubusercontent.com/aiboboxx/v2rayfree/refs/heads/main/v2
+  - https://raw.githubusercontent.com/acymz/AutoVPN/main/data/V2.txt
+  - https://raw.githubusercontent.com/ggborr/FREEE-VPN/refs/heads/main/6V2ray
+  - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/wenode.txt
+  - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/v2rayshare.txt
+  - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/nodefree.txt
+  - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/ndnode.txt
+  - https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/clashmeta.txt
+  - https://raw.githubusercontent.com/xiaoji235/airport-free/main/v2ray/v2rayshare.txt
+  - https://raw.githubusercontent.com/xiaoji235/airport-free/main/v2ray.txt

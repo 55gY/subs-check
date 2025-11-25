@@ -41,7 +41,6 @@ type ProgressTracker struct {
 	// 成功数量
 	aliveSuccess atomic.Int32
 	speedSuccess atomic.Int32
-	speedQualified atomic.Int32 // 测速达标数量
 
 	// 当前处于 测活-测速-媒体检测 阶段 (0=存活, 1=测速, 2=媒体)
 	currentStage atomic.Int32
@@ -103,7 +102,6 @@ func (pt *ProgressTracker) CountSpeed(success bool) {
 	pt.speedDone.Add(1)
 	if success {
 		pt.speedSuccess.Add(1)
-		pt.speedQualified.Add(1) // 测速达标
 	}
 	pt.refresh()
 }
@@ -112,6 +110,67 @@ func (pt *ProgressTracker) CountSpeed(success bool) {
 func (pt *ProgressTracker) CountMedia() {
 	pt.mediaDone.Add(1)
 	pt.refresh()
+}
+
+// refresh 计算并更新全局进度。
+func (pt *ProgressTracker) refresh() {
+	total := float64(pt.totalJobs.Load())
+	if total == 0 {
+		return
+	}
+
+	// 计算各阶段完成百分比 (0.0 - 1.0)
+	// 注意：分母是 total，意味着假设所有节点都通过了前一阶段
+	// 实际上，后续阶段的任务数会少于 total，但这正是动态权重的意义所在：
+	// 失败的节点在早期阶段就被视为“完成了后续所有阶段的进度贡献”
+	
+	// 修正逻辑：
+	// 存活检测失败的节点，视为完成了测速和媒体检测
+	// 测速失败的节点，视为完成了媒体检测
+	
+	aliveDone := float64(pt.aliveDone.Load())
+	aliveFail := aliveDone - float64(pt.aliveSuccess.Load())
+	
+	speedDone := float64(pt.speedDone.Load())
+	speedFail := speedDone - float64(pt.speedSuccess.Load())
+	
+	mediaDone := float64(pt.mediaDone.Load())
+
+	// 计算加权进度
+	// 存活阶段贡献：(已测活 / 总数) * 权重
+	pAlive := (aliveDone / total) * progressWeight.alive
+
+	// 测速阶段贡献：((已测速 + 存活失败) / 总数) * 权重
+	// 解释：存活失败的节点虽然没测速，但它对测速阶段进度的贡献是“已处理”
+	pSpeed := ((speedDone + aliveFail) / total) * progressWeight.speed
+
+	// 媒体阶段贡献：((已媒体 + 测速失败 + 存活失败) / 总数) * 权重
+	pMedia := ((mediaDone + speedFail + aliveFail) / total) * progressWeight.media
+
+	currentProgress := pAlive + pSpeed + pMedia
+	
+	// 限制在 100% 以内
+	if currentProgress > 100 {
+		currentProgress = 100
+	}
+
+	// 更新全局原子变量，供 showProgress 读取
+	// Progress 存储的是百分比 * 100 (即 0-10000，如果需要更高精度)
+	// 但原代码 showProgress 似乎是用 current / total * 100
+	// 这里我们需要适配原有的 showProgress 或者重写它
+	// 假设我们重写 showProgress 来直接读取 Progress 作为百分比
+	// 或者我们这里反向计算出一个虚拟的 "current" 值
+	
+	virtualCurrent := int32(currentProgress / 100.0 * total)
+	Progress.Store(uint32(virtualCurrent))
+	
+	// 也可以直接存储百分比，修改 check.go 中的 showProgress
+}
+
+// SetStage 设置当前阶段
+func (pt *ProgressTracker) SetStage(stage int32, name string) {
+	pt.currentStage.Store(stage)
+	pt.stageName.Store(name)
 }
 
 // GetStageInfo 获取当前阶段信息
@@ -127,74 +186,10 @@ func (pt *ProgressTracker) GetStageInfo() (stage int32, name string, done, succe
 		success = pt.aliveSuccess.Load()
 	case 1: // 测速
 		done = pt.speedDone.Load()
-		success = pt.speedQualified.Load() // 返回测速达标数量而不是测速成功数量
+		success = pt.speedSuccess.Load()
 	case 2: // 媒体检测
 		done = pt.mediaDone.Load()
 		success = 0 // 媒体检测不区分成功失败
 	}
 	return
-}
-
-// refresh 更新进度条显示
-func (pt *ProgressTracker) refresh() {
-	if pt.finalized.Load() {
-		return
-	}
-
-	switch progressAlgorithm {
-	case DynamicWeightProgress:
-		pt.refreshDynamicWeight()
-	case StagePriorityProgress:
-		pt.refreshStagePriority()
-	}
-}
-
-// refreshDynamicWeight 动态权重模式
-func (pt *ProgressTracker) refreshDynamicWeight() {
-	total := pt.totalJobs.Load()
-	if total == 0 {
-		return
-	}
-
-	aliveDone := pt.aliveDone.Load()
-	speedDone := pt.speedDone.Load()
-	mediaDone := pt.mediaDone.Load()
-
-	aliveWeight := getCheckWeight(true, true).alive
-	speedWeight := getCheckWeight(true, true).speed
-	mediaWeight := getCheckWeight(true, true).media
-
-	aliveProgress := float64(aliveDone) / float64(total) * aliveWeight
-	speedProgress := float64(speedDone) / float64(total) * speedWeight
-	mediaProgress := float64(mediaDone) / float64(total) * mediaWeight
-
-	progress := aliveProgress + speedProgress + mediaProgress
-	Progress.Store(int32(progress))
-}
-
-// refreshStagePriority 阶段优先模式
-func (pt *ProgressTracker) refreshStagePriority() {
-	total := pt.totalJobs.Load()
-	if total == 0 {
-		return
-	}
-
-	stage := pt.currentStage.Load()
-	done := int32(0)
-	switch stage {
-	case 0: // 存活检测
-		done = pt.aliveDone.Load()
-	case 1: // 测速
-		done = pt.speedDone.Load()
-	case 2: // 媒体检测
-		done = pt.mediaDone.Load()
-	}
-
-	progress := float64(done) / float64(total) * 100
-	Progress.Store(int32(progress))
-}
-
-// Finalize 结束进度条显示
-func (pt *ProgressTracker) Finalize() {
-	pt.finalized.Store(true)
 }

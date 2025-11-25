@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/55gY/subs-check/config"
+	"github.com/55gY/subs-check/utils"
 	"github.com/metacubex/mihomo/common/convert"
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v3"
@@ -251,7 +252,7 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					proxyChan <- proxyMap
 				}
 			}
-		}(subUrl)
+		}(utils.WarpUrl(subUrl))
 	}
 
 	// 等待所有工作协程完成
@@ -296,7 +297,7 @@ func resolveSubUrls() ([]string, int, int) {
 	// 远程清单
 	if len(config.GlobalConfig.SubUrlsRemote) != 0 {
 		for _, d := range config.GlobalConfig.SubUrlsRemote {
-			if remote, err := fetchRemoteSubUrls(d); err != nil {
+			if remote, err := fetchRemoteSubUrls(utils.WarpUrl(d)); err != nil {
 				slog.Warn("获取远程订阅清单失败，已忽略", "err", err)
 			} else {
 				remoteNum += len(remote)
@@ -373,38 +374,6 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 	}
 	var lastErr error
 
-	// 检查是否是GitHub链接，如果是则尝试使用代理
-	var urlsToTry []string
-
-	// 规范化URL，确保有协议头
-	normalizedURL := subUrl
-	if !strings.HasPrefix(subUrl, "http://") && !strings.HasPrefix(subUrl, "https://") {
-		// GitHub/raw 默认 https
-		if strings.HasPrefix(subUrl, "raw.githubusercontent.com/") || strings.Contains(subUrl, "github.com/") {
-			normalizedURL = "https://" + subUrl
-		} else {
-			// 其他情况默认 http
-			normalizedURL = "http://" + subUrl
-		}
-	}
-
-	// 处理GitHub代理
-	if (strings.Contains(normalizedURL, "github.com") || strings.Contains(normalizedURL, "raw.githubusercontent.com")) && config.GlobalConfig.GithubProxy != "" {
-		// 处理单个代理字符串或代理列表
-		v := config.GlobalConfig.GithubProxy
-		if v != "" {
-			proxyUrl := strings.TrimSuffix(v, "/")
-			// 确保代理URL有协议头
-			if !strings.HasPrefix(proxyUrl, "http://") && !strings.HasPrefix(proxyUrl, "https://") {
-				proxyUrl = "https://" + proxyUrl
-			}
-			urlsToTry = append(urlsToTry, proxyUrl+"/"+normalizedURL)
-		}
-	}
-
-	// 添加原始URL作为最后的备选
-	urlsToTry = append(urlsToTry, normalizedURL)
-
 	client := &http.Client{
 		Timeout: time.Duration(timeout) * time.Second,
 		Transport: &http.Transport{
@@ -420,54 +389,43 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 		},
 	}
 
-	// 尝试每个URL
-	for _, url := range urlsToTry {
-		slog.Debug("尝试获取订阅", "url", url)
-
-		// 对每个URL进行重试
-		for i := 0; i < maxRetries; i++ {
-			if i > 0 {
-				time.Sleep(time.Duration(retryInterval) * time.Second)
-			}
-
-			req, err := http.NewRequest("GET", url, nil)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-
-			if config.GlobalConfig.SubUrlsGetUA == "random" {
-				req.Header.Set("User-Agent", convert.RandUserAgent())
-			} else {
-				req.Header.Set("User-Agent", config.GlobalConfig.SubUrlsGetUA)
-			}
-
-			resp, err := client.Do(req)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode != 200 {
-				lastErr = fmt.Errorf("订阅链接: %s 返回状态码: %d", url, resp.StatusCode)
-				continue
-			}
-
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				lastErr = fmt.Errorf("读取订阅链接: %s 数据错误: %v", url, err)
-				continue
-			}
-
-			// 如果使用代理成功，记录日志
-			if url != subUrl {
-				slog.Info("使用代理成功获取订阅", "url", subUrl, "proxy", url)
-			}
-			return body, nil
+	for i := 0; i < maxRetries; i++ {
+		if i > 0 {
+			time.Sleep(time.Duration(retryInterval) * time.Second)
 		}
+
+		req, err := http.NewRequest("GET", subUrl, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if config.GlobalConfig.SubUrlsGetUA == "random" {
+			req.Header.Set("User-Agent", convert.RandUserAgent())
+		} else {
+			req.Header.Set("User-Agent", config.GlobalConfig.SubUrlsGetUA)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			lastErr = fmt.Errorf("订阅链接: %s 返回状态码: %d", subUrl, resp.StatusCode)
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("读取订阅链接: %s 数据错误: %v", subUrl, err)
+			continue
+		}
+		return body, nil
 	}
 
-	return nil, fmt.Errorf("所有URL尝试%d次后失败: %v", maxRetries, lastErr)
+	return nil, fmt.Errorf("重试%d次后失败: %v", maxRetries, lastErr)
 }
 
 func extractV2RayLinks(data []byte) []string {
