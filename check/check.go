@@ -463,10 +463,10 @@ func updateProxyName(res *Result, httpClient *ProxyClient, speed int) bool {
 	// 以节点IP查询位置重命名节点
 	if config.GlobalConfig.RenameNode {
 		if res.Country != "" {
-			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(res.Country)
+			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(res.Country, "")
 		} else {
 			country, _ := proxyutils.GetProxyCountry(httpClient.Client)
-			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(country)
+			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(country, "")
 		}
 	}
 
