@@ -47,7 +47,7 @@ type Config struct {
 	NodeType             []string `yaml:"node-type"`
 	EnableWebUI          bool     `yaml:"enable-web-ui"`
 	APIKey               string   `yaml:"api-key"`
-	GithubProxy          []string `yaml:"github-proxy"`
+	GithubProxy          interface{} `yaml:"github-proxy"`
 	Proxy                string   `yaml:"proxy"`
 	CallbackScript       string   `yaml:"callback-script"`
 	RemoveFailedSubRetry int      `yaml:"remove-failed-sub-retry"`

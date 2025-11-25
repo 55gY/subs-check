@@ -375,20 +375,50 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 
 	// 检查是否是GitHub链接，如果是则尝试使用代理
 	var urlsToTry []string
-	if strings.Contains(subUrl, "github.com") && len(config.GlobalConfig.GithubProxy) > 0 {
-		// 为每个代理URL创建一个完整的URL
-		for _, proxy := range config.GlobalConfig.GithubProxy {
-			if proxy != "" {
-				proxyUrl := strings.TrimSuffix(proxy, "/")
-				urlsToTry = append(urlsToTry, proxyUrl+"/"+subUrl)
+
+	// 规范化URL，确保有协议头
+	normalizedURL := subUrl
+	if !strings.HasPrefix(subUrl, "http://") && !strings.HasPrefix(subUrl, "https://") {
+		// GitHub/raw 默认 https
+		if strings.HasPrefix(subUrl, "raw.githubusercontent.com/") || strings.Contains(subUrl, "github.com/") {
+			normalizedURL = "https://" + subUrl
+		} else {
+			// 其他情况默认 http
+			normalizedURL = "http://" + subUrl
+		}
+	}
+
+	// 处理GitHub代理
+	if (strings.Contains(normalizedURL, "github.com") || strings.Contains(normalizedURL, "raw.githubusercontent.com")) && config.GlobalConfig.GithubProxy != nil {
+		// 处理单个代理字符串或代理列表
+		switch v := config.GlobalConfig.GithubProxy.(type) {
+		case string:
+			// 单个代理字符串
+			if v != "" {
+				proxyUrl := strings.TrimSuffix(v, "/")
+				// 确保代理URL有协议头
+				if !strings.HasPrefix(proxyUrl, "http://") && !strings.HasPrefix(proxyUrl, "https://") {
+					proxyUrl = "https://" + proxyUrl
+				}
+				urlsToTry = append(urlsToTry, proxyUrl+"/"+normalizedURL)
+			}
+		case []interface{}:
+			// 代理列表
+			for _, proxy := range v {
+				if proxyStr, ok := proxy.(string); ok && proxyStr != "" {
+					proxyUrl := strings.TrimSuffix(proxyStr, "/")
+					// 确保代理URL有协议头
+					if !strings.HasPrefix(proxyUrl, "http://") && !strings.HasPrefix(proxyUrl, "https://") {
+						proxyUrl = "https://" + proxyUrl
+					}
+					urlsToTry = append(urlsToTry, proxyUrl+"/"+normalizedURL)
+				}
 			}
 		}
-		// 添加原始URL作为最后的备选
-		urlsToTry = append(urlsToTry, subUrl)
-	} else {
-		// 非GitHub链接直接使用原始URL
-		urlsToTry = []string{subUrl}
 	}
+
+	// 添加原始URL作为最后的备选
+	urlsToTry = append(urlsToTry, normalizedURL)
 
 	client := &http.Client{
 		Timeout: time.Duration(timeout) * time.Second,
