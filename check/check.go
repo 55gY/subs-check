@@ -58,6 +58,7 @@ var ForceClose atomic.Bool
 var Bucket *ratelimit.Bucket
 
 var progressWeight ProgressWeight
+var globalTracker *ProgressTracker // 添加全局tracker变量
 
 // Check 执行代理检测的主函数 (Adaptive Pipeline)
 func Check() ([]Result, error) {
@@ -94,8 +95,7 @@ func Check() ([]Result, error) {
 					ProxyCount.Store(uint32(total))
 				}
 			}
-		}
-	}()
+		}()
 	
 	tmp, failedSubs, successSubs, err := proxyutils.GetProxies()
 	close(subsFetchDone) // 停止进度同步
@@ -141,6 +141,7 @@ func Check() ([]Result, error) {
 	mediaON := config.GlobalConfig.MediaCheck
 	progressWeight = getCheckWeight(speedON, mediaON)
 	tracker := NewProgressTracker(len(proxies))
+	globalTracker = tracker // 保存tracker到全局变量
 	
 	slog.Info("检测模式配置", 
 		"存活检测", true,
@@ -555,6 +556,7 @@ func updateProxyName(res *Result, httpClient *ProxyClient, speed int) bool {
 func showProgress(done chan bool, total int) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+	
 	for {
 		select {
 		case <-done:
@@ -568,12 +570,39 @@ func showProgress(done chan bool, total int) {
 			}
 			available := Available.Load()
 			
-			fmt.Printf("\r进度: [%-45s] %.1f%% (%d/%d) 可用: %d",
-				strings.Repeat("=", int(pct/2))+">",
-				pct,
-				p,
-				total,
-				available)
+			// 如果有全局tracker，则显示详细阶段信息
+			if globalTracker != nil {
+				stage, name, doneCount, successCount := globalTracker.GetStageInfo()
+				if stage == 1 { // 测速阶段
+					fmt.Printf("\r进度: [%-45s] %.1f%% (%d/%d) 可用: %d | 阶段: %s (%d/%d)",
+						strings.Repeat("=", int(pct/2))+">",
+						pct,
+						p,
+						total,
+						available,
+						name,
+						successCount, // 测速达标数
+						doneCount)    // 测速完成数
+				} else {
+					fmt.Printf("\r进度: [%-45s] %.1f%% (%d/%d) 可用: %d | 阶段: %s (%d/%d)",
+						strings.Repeat("=", int(pct/2))+">",
+						pct,
+						p,
+						total,
+						available,
+						name,
+						successCount, // 对于其他阶段，这是成功数
+						doneCount)    // 对于其他阶段，这是完成数
+				}
+			} else {
+				// 显示基本进度信息
+				fmt.Printf("\r进度: [%-45s] %.1f%% (%d/%d) 可用: %d",
+					strings.Repeat("=", int(pct/2))+">",
+					pct,
+					p,
+					total,
+					available)
+			}
 		}
 	}
 }
