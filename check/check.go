@@ -337,9 +337,10 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 			} else if mediaON {
 				mediaOut <- item
 			} else {
-				updateProxyName(item.Result, client, 0)
-				Available.Add(1)
-				resOut <- *item.Result
+				if updateProxyName(item.Result, client, 0) {
+					Available.Add(1)
+					resOut <- *item.Result
+				}
 				client.Close()
 			}
 		}
@@ -381,9 +382,10 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 			if mediaON {
 				mediaOut <- item
 			} else {
-				updateProxyName(item.Result, item.Client, speed)
-				Available.Add(1)
-				resOut <- *item.Result
+				if updateProxyName(item.Result, item.Client, speed) {
+					Available.Add(1)
+					resOut <- *item.Result
+				}
 				item.Client.Close()
 			}
 		}
@@ -445,17 +447,19 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 			}
 			
 			tracker.CountMedia()
-			updateProxyName(item.Result, item.Client, item.Speed)
+			if updateProxyName(item.Result, item.Client, item.Speed) {
 			
-			Available.Add(1)
-			resOut <- *item.Result
+				Available.Add(1)
+				resOut <- *item.Result
+			}
 			item.Client.Close()
 		}
 	}
 }
 
 // updateProxyName 更新代理名称
-func updateProxyName(res *Result, httpClient *ProxyClient, speed int) {
+// 返回值表示是否应该保留该节点
+func updateProxyName(res *Result, httpClient *ProxyClient, speed int) bool {
 	// 以节点IP查询位置重命名节点
 	if config.GlobalConfig.RenameNode {
 		if res.Country != "" {
@@ -539,6 +543,13 @@ func updateProxyName(res *Result, httpClient *ProxyClient, speed int) {
 	}
 
 	res.Proxy["name"] = name
+
+	// 检查名称是否包含CN，如果包含则丢弃该节点
+	if strings.Contains(strings.ToUpper(name), "CN") {
+		return false
+	}
+
+	return true
 }
 
 func showProgress(done chan bool, total int) {

@@ -2,6 +2,7 @@ package proxies
 
 import (
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -11,12 +12,16 @@ var (
 )
 
 func Rename(name string) string {
+	// 如果节点名称包含CN，则丢弃该节点
+	if strings.Contains(strings.ToUpper(name), "CN") {
+		return ""
+	}
+
 	counterLock.Lock()
 	defer counterLock.Unlock()
 
 	counter[name]++
 	return CountryCodeToFlag(name) + name + "_" + strconv.Itoa(counter[name])
-
 }
 
 // ResetRenameCounter 将所有计数器重置为 0
