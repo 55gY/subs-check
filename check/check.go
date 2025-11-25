@@ -256,10 +256,7 @@ func Check() ([]Result, error) {
 		}
 		close(mediaChan)
 	}()
-	go func() {
-		mediaWG.Wait()
-		close(resultChan)
-	}()
+	
 
 	// 收集结果
 	var results []Result
@@ -284,7 +281,10 @@ func Check() ([]Result, error) {
 	slog.Info(fmt.Sprintf("测试总消耗流量: %.3fGB", float64(TotalBytes.Load())/1024/1024/1024))
 
 	checkSubscriptionSuccessRate(proxies, results)
-
+	go func() {
+		mediaWG.Wait()
+		close(resultChan)
+	}()
 	return results, nil
 }
 
