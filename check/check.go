@@ -351,11 +351,11 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("speedWorker退出", "已处理", processedCount)
+			// slog.Info("speedWorker退出", "已处理", processedCount)
 			return
 		case item, ok := <-in:
 			if !ok {
-				slog.Info("speedWorker接收到关闭信号", "已处理", processedCount)
+				// slog.Info("speedWorker接收到关闭信号", "已处理", processedCount)
 				return
 			}
 			processedCount++
