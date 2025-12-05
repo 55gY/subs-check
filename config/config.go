@@ -133,6 +133,8 @@ func RemoveSubUrl(configPath, subUrl string) error {
 					if ch == '-' {
 						// 提取URL部分（去掉 "- " 和前后空格）
 						urlPart := strings.TrimSpace(line[i+1:])
+						// 去掉可能的引号
+						urlPart = strings.Trim(urlPart, `"'`)
 						// 如果这行包含要删除的URL，标记跳过这一行
 						if urlPart == subUrl {
 							slog.Info("从配置文件中删除失败的订阅链接", "url", subUrl)
