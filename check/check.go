@@ -122,9 +122,9 @@ func Check() ([]Result, error) {
 			continue
 		}
 		if config.ShouldRemoveFailedSub(failedUrl, failureCount) {
-			slog.Warn("订阅链接失败次数达到限制，将从配置文件中删除", "url", failedUrl, "失败次数", failureCount, "配置值", config.GlobalConfig.RemoveFailedSubRetry)
+			slog.Warn("已删除失败订阅", "url", failedUrl, "失败次数", failureCount)
 			if err := config.RemoveSubUrlFromConfig(failedUrl); err != nil {
-				slog.Error("删除失败的订阅链接时出错", "error", err, "url", failedUrl)
+				slog.Error("删除订阅失败", "error", err)
 			}
 		}
 	}

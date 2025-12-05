@@ -137,7 +137,6 @@ func RemoveSubUrl(configPath, subUrl string) error {
 						urlPart = strings.Trim(urlPart, `"'`)
 						// 如果这行包含要删除的URL，标记跳过这一行
 						if urlPart == subUrl {
-							slog.Info("从配置文件中删除失败的订阅链接", "url", subUrl)
 							shouldSkip = true
 						}
 						break
@@ -255,8 +254,6 @@ func IncrementFailureCount(subUrl string) (int, error) {
 		return currentCount, err
 	}
 	
-	slog.Info("记录订阅链接失败", "url", subUrl, "失败次数", currentCount, "删除阈值", GlobalConfig.RemoveFailedSubRetry)
-	
 	return currentCount, nil
 }
 
@@ -270,7 +267,6 @@ func ResetFailureCount(subUrl string) error {
 	// 如果该URL存在失败记录，删除它
 	if _, exists := records[subUrl]; exists {
 		delete(records, subUrl)
-		slog.Info("重置订阅链接失败计数", "url", subUrl)
 		return WriteFailureRecord(records)
 	}
 	

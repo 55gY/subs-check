@@ -117,10 +117,11 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 			defer func() { <-concurrentLimit }() // 释放令牌
 			defer completedTotal.Add(1)
 
-			data, err := GetDateFromSubs(url)
+			// 使用 WarpUrl 处理后的 URL 获取数据
+			actualUrl := utils.WarpUrl(url)
+			data, err := GetDateFromSubs(actualUrl)
 			if err != nil {
-				slog.Error(fmt.Sprintf("获取订阅链接错误跳过: %v", err))
-				// 记录失败的订阅链接
+				// 记录失败的订阅链接（使用原始URL）
 				markFailed(url)
 				return
 			}
@@ -141,7 +142,6 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					extractedData := []byte(strings.Join(fallbackLinks, "\n"))
 					proxyList, err = convert.ConvertsV2Ray(extractedData)
 					if err != nil {
-						slog.Error(fmt.Sprintf("解析回退文本中提取的V2Ray链接错误: %v", err), "url", url)
 						markFailed(url)
 						return
 					}
@@ -167,7 +167,6 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					}
 				}
 				markSuccess(url)
-				slog.Debug(fmt.Sprintf("获取订阅链接: %s，有效节点数量: %d", url, len(proxyList)))
 				for _, proxy := range proxyList {
 					// 只测试指定协议
 					if t, ok := proxy["type"].(string); ok {
@@ -186,7 +185,6 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 
 		proxyInterface, ok := con["proxies"]
 		if !ok || proxyInterface == nil {
-			slog.Error(fmt.Sprintf("订阅链接没有proxies: %s", url))
 			markFailed(url)
 				return
 			}
@@ -211,7 +209,6 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					con2 := map[string]any{guessSchemeByURL(url): strArr}
 					converted := convertUnStandandJsonViaConvert(con2)
 					if len(converted) > 0 {
-						slog.Debug(fmt.Sprintf("proxies为字符串数组，已按URL猜测协议转换: %s，数量: %d", url, len(converted)))
 						for _, proxy := range converted {
 							if t, ok := proxy["type"].(string); ok {
 								if len(config.GlobalConfig.NodeType) > 0 && !lo.Contains(config.GlobalConfig.NodeType, t) {
@@ -228,7 +225,6 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 				}
 			}
 			markSuccess(url)
-			slog.Debug(fmt.Sprintf("获取订阅链接: %s，有效节点数量: %d", url, len(proxyList)))
 			for _, proxy := range proxyList {
 				if proxyMap, ok := proxy.(map[string]any); ok {
 					if t, ok := proxyMap["type"].(string); ok {
@@ -252,7 +248,7 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					proxyChan <- proxyMap
 				}
 			}
-		}(utils.WarpUrl(subUrl))
+		}(subUrl)
 	}
 
 	// 等待所有工作协程完成
