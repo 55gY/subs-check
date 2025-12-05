@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"bufio"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 )
