@@ -377,10 +377,16 @@ curl -X POST -H "X-API-Key: YOUR_API_KEY" \
   -d '{"content": "your yaml config content"}' \
   http://localhost:8199/api/config
 
-# 添加订阅链接（重要功能）
+# 添加订阅链接
 curl -X POST -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"sub_url": "https://example.com/subscription"}' \
+  http://localhost:8199/api/config/add
+
+# 添加单个节点（新功能）
+curl -X POST -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"ss": "vmess://eyJ2IjoiMi..."}' \
   http://localhost:8199/api/config/add
 
 # 获取运行状态
@@ -507,9 +513,11 @@ Environment="SUB_CHECK_MEM_MONITOR=1"
 
 ### 动态订阅管理（addConfig API）
 
-通过 Web API 动态添加订阅链接，无需手动编辑配置文件：
+通过 Web API 动态添加订阅链接或单个节点，无需手动编辑配置文件：
 
 **API 端点：** `POST /api/config/add`
+
+#### 方式一：添加订阅链接
 
 **请求示例：**
 ```bash
@@ -524,6 +532,42 @@ curl -X POST http://localhost:8199/api/config/add \
 - 📝 保留配置文件的原有格式和注释
 - 🔄 添加后自动触发配置热重载
 - 🎯 精确定位 `sub-urls` 部分并追加
+
+#### 方式二：添加单个节点（新功能）
+
+**请求示例：**
+```bash
+curl -X POST http://localhost:8199/api/config/add \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"ss": "vmess://eyJ2IjoiMiIsInBzIjoi576O..."}'
+```
+
+**支持的协议：**
+- VMess: `vmess://...`
+- VLESS: `vless://...`
+- Shadowsocks: `ss://...`
+- ShadowsocksR: `ssr://...`
+- Trojan: `trojan://...`
+- Hysteria: `hysteria://...`
+- Hysteria2: `hysteria2://...`
+- TUIC: `tuic://...`
+- Juicity: `juicity://...`
+
+**功能特点：**
+- ✅ 自动解析节点链接
+- 🔍 智能去重检测（根据协议类型匹配关键字段）
+- 📝 直接添加到 `all.yaml` 文件
+- 🚀 立即生效，无需重启
+
+**去重规则：**
+- 基础字段：`type` + `server` + `port`
+- 协议特定字段：
+  - VMess: `uuid` + `alterId`
+  - VLESS: `uuid`
+  - Shadowsocks: `cipher` + `password`
+  - Trojan: `password` + `sni`
+  - 其他协议类似
 
 **响应示例：**
 ```json
