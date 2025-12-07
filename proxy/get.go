@@ -29,6 +29,16 @@ var SubsFetchTotal atomic.Int32     // 总数
 var SubsFetchSuccess atomic.Int32   // 成功数
 var SubsFetchFailed atomic.Int32    // 失败数
 
+// ParseSingleNode 解析单个节点链接（vmess/ss/trojan等）
+func ParseSingleNode(nodeLink string) ([]map[string]any, error) {
+	// 使用mihomo的convert包解析
+	proxies, err := convert.ConvertsV2Ray([]byte(nodeLink))
+	if err != nil {
+		return nil, fmt.Errorf("解析节点链接失败: %w", err)
+	}
+	return proxies, nil
+}
+
 func GetProxies() ([]map[string]any, []string, []string, error) {
 
 	// 解析本地与远程订阅清单

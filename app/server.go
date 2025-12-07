@@ -159,10 +159,11 @@ func (app *App) updateConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "配置已更新"})
 }
 
-// addConfig 向配置文件的sub-urls中新增一条数据
+// addConfig 向配置文件的sub-urls中新增一条数据，或添加单个节点到all.yaml
 func (app *App) addConfig(c *gin.Context) {
 	var req struct {
 		SubUrl string `json:"sub_url"`
+		SS     string `json:"ss"` // 单个节点链接（支持vmess/ss/trojan等）
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -170,8 +171,18 @@ func (app *App) addConfig(c *gin.Context) {
 		return
 	}
 
+	// 如果是单个节点添加
+	if req.SS != "" {
+		if err := app.addSingleNode(req.SS); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("添加节点失败: %v", err)})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "节点已添加"})
+		return
+	}
+
 	if req.SubUrl == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sub_url不能为空"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sub_url或ss不能为空"})
 		return
 	}
 
@@ -391,4 +402,176 @@ func ReadLastNLines(filePath string, n int) ([]string, error) {
 
 func GenerateSimpleKey() string {
 	return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+}
+
+// addSingleNode 添加单个节点到all.yaml
+func (app *App) addSingleNode(nodeLink string) error {
+	// 1. 解析节点链接
+	proxies, err := proxyutils.ParseSingleNode(nodeLink)
+	if err != nil {
+		return fmt.Errorf("解析节点失败: %w", err)
+	}
+	
+	if len(proxies) == 0 {
+		return fmt.Errorf("未能解析出有效节点")
+	}
+	
+	// 2. 读取现有的all.yaml
+	saver, err := method.NewLocalSaver()
+	if err != nil {
+		return fmt.Errorf("创建保存器失败: %w", err)
+	}
+	
+	allYamlPath := saver.OutputPath + "/all.yaml"
+	var existingConfig map[string]any
+	
+	if data, err := os.ReadFile(allYamlPath); err == nil {
+		if err := yaml.Unmarshal(data, &existingConfig); err != nil {
+			return fmt.Errorf("解析all.yaml失败: %w", err)
+		}
+	} else {
+		// 文件不存在，创建新配置
+		existingConfig = make(map[string]any)
+	}
+	
+	// 3. 获取现有proxies列表
+	var existingProxies []map[string]any
+	if proxiesInterface, ok := existingConfig["proxies"]; ok {
+		if proxiesList, ok := proxiesInterface.([]any); ok {
+			for _, p := range proxiesList {
+				if proxyMap, ok := p.(map[string]any); ok {
+					existingProxies = append(existingProxies, proxyMap)
+				}
+			}
+		}
+	}
+	
+	// 4. 检查是否已存在（使用更健壮的判断方式）
+	newProxy := proxies[0]
+	if isProxyDuplicate(newProxy, existingProxies) {
+		return fmt.Errorf("节点已存在")
+	}
+	
+	// 5. 添加新节点
+	existingProxies = append(existingProxies, newProxy)
+	existingConfig["proxies"] = existingProxies
+	
+	// 6. 写回文件
+	newData, err := yaml.Marshal(existingConfig)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+	
+	if err := os.MkdirAll(saver.OutputPath, 0755); err != nil {
+		return fmt.Errorf("创建输出目录失败: %w", err)
+	}
+	
+	if err := os.WriteFile(allYamlPath, newData, 0644); err != nil {
+		return fmt.Errorf("写入all.yaml失败: %w", err)
+	}
+	
+	return nil
+}
+
+// isProxyDuplicate 判断节点是否重复（更健壮的判断方式）
+func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any) bool {
+	for _, existing := range existingProxies {
+		// 1. 基础字段必须匹配
+		if existing["type"] != newProxy["type"] {
+			continue
+		}
+		if existing["server"] != newProxy["server"] {
+			continue
+		}
+		if existing["port"] != newProxy["port"] {
+			continue
+		}
+		
+		proxyType, _ := newProxy["type"].(string)
+		
+		// 2. 根据不同协议类型检查关键字段
+		switch proxyType {
+		case "vmess":
+			// VMess: server + port + uuid + alterId
+			if existing["uuid"] != newProxy["uuid"] {
+				continue
+			}
+			if existing["alterId"] != newProxy["alterId"] {
+				continue
+			}
+			
+		case "vless":
+			// VLESS: server + port + uuid + flow
+			if existing["uuid"] != newProxy["uuid"] {
+				continue
+			}
+			
+		case "ss", "shadowsocks":
+			// Shadowsocks: server + port + cipher + password
+			if existing["cipher"] != newProxy["cipher"] {
+				continue
+			}
+			if existing["password"] != newProxy["password"] {
+				continue
+			}
+			
+		case "ssr":
+			// ShadowsocksR: server + port + cipher + password + protocol + obfs
+			if existing["cipher"] != newProxy["cipher"] {
+				continue
+			}
+			if existing["password"] != newProxy["password"] {
+				continue
+			}
+			if existing["protocol"] != newProxy["protocol"] {
+				continue
+			}
+			if existing["obfs"] != newProxy["obfs"] {
+				continue
+			}
+			
+		case "trojan":
+			// Trojan: server + port + password + sni
+			if existing["password"] != newProxy["password"] {
+				continue
+			}
+			sni1, _ := existing["sni"].(string)
+			sni2, _ := newProxy["sni"].(string)
+			if sni1 != sni2 {
+				continue
+			}
+			
+		case "hysteria", "hysteria2", "hy2":
+			// Hysteria: server + port + password/auth
+			pass1 := existing["password"]
+			pass2 := newProxy["password"]
+			auth1 := existing["auth"]
+			auth2 := newProxy["auth"]
+			
+			// password 和 auth 可能是不同字段名
+			if pass1 != pass2 && auth1 != auth2 {
+				continue
+			}
+			
+		case "tuic":
+			// TUIC: server + port + uuid + password
+			if existing["uuid"] != newProxy["uuid"] {
+				continue
+			}
+			if existing["password"] != newProxy["password"] {
+				continue
+			}
+			
+		default:
+			// 其他协议：比较 server + port + name
+			if existing["name"] != newProxy["name"] {
+				continue
+			}
+		}
+		
+		// 所有关键字段都匹配，判定为重复
+		return true
+	}
+	
+	return false
 }
