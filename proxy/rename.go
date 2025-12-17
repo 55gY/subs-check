@@ -1,7 +1,6 @@
 package proxies
 
 import (
-	"strconv"
 	"sync"
 )
 
