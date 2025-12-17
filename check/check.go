@@ -427,14 +427,11 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 							item.Result.Gemini = true
 						}
 					case "iprisk":
-						country, ip := proxyutils.GetProxyCountry(item.Client.Client)
+						country, ip, fraudScore := proxyutils.GetProxyCountry(item.Client.Client)
 						if ip != "" {
 							item.Result.IP = ip
 							item.Result.Country = country
-							risk, err := platform.CheckIPRisk(item.Client.Client, ip)
-							if err == nil {
-								item.Result.IPRisk = risk
-							}
+							item.Result.IPRisk = proxyutils.GetFraudScoreLabel(fraudScore)
 						}
 					case "tiktok":
 						if region, _ := platform.CheckTikTok(item.Client.Client); region != "" {
