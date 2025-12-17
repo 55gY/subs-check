@@ -13,22 +13,26 @@ import (
 	"github.com/metacubex/mihomo/common/convert"
 )
 
-func GetProxyCountry(httpClient *http.Client) (loc string, ip string) {
+func GetProxyCountry(httpClient *http.Client) (loc string, ip string, fraudScore int) {
 	for i := 0; i < config.GlobalConfig.SubUrlsReTry; i++ {
-		loc, ip = GetMe(httpClient)
+		loc, ip, fraudScore = GetIPPure(httpClient)
 		if loc != "" && ip != "" {
 			return
 		}
-		loc, ip = GetIPLark(httpClient)
+		loc, ip, _ = GetMe(httpClient)
 		if loc != "" && ip != "" {
 			return
 		}
-		loc, ip = GetCFProxy(httpClient)
+		loc, ip, _ = GetIPLark(httpClient)
+		if loc != "" && ip != "" {
+			return
+		}
+		loc, ip, _ = GetCFProxy(httpClient)
 		if loc != "" && ip != "" {
 			return
 		}
 		// 不准
-		loc, ip = GetEdgeOneProxy(httpClient)
+		loc, ip, _ = GetEdgeOneProxy(httpClient)
 		if loc != "" && ip != "" {
 			return
 		}
@@ -36,7 +40,49 @@ func GetProxyCountry(httpClient *http.Client) (loc string, ip string) {
 	return
 }
 
-func GetEdgeOneProxy(httpClient *http.Client) (loc string, ip string) {
+func GetIPPure(httpClient *http.Client) (loc string, ip string, fraudScore int) {
+	type IPPureResponse struct {
+		IP          string `json:"ip"`
+		CountryCode string `json:"countryCode"`
+		FraudScore  int    `json:"fraudScore"`
+	}
+
+	url := "https://my.ippure.com/v1/info"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("创建请求失败: %s", err))
+		return
+	}
+	req.Header.Set("User-Agent", convert.RandUserAgent())
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("ippure获取节点位置失败: %s", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Debug(fmt.Sprintf("ippure返回非200状态码: %v", resp.StatusCode))
+		return
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("ippure读取节点位置失败: %s", err))
+		return
+	}
+
+	var data IPPureResponse
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("解析ippure JSON 失败: %v", err))
+		return
+	}
+
+	return data.CountryCode, data.IP, data.FraudScore
+}
+
+func GetEdgeOneProxy(httpClient *http.Client) (loc string, ip string, fraudScore int) {
 	type GeoResponse struct {
 		Eo struct {
 			Geo struct {
@@ -78,10 +124,10 @@ func GetEdgeOneProxy(httpClient *http.Client) (loc string, ip string) {
 		return
 	}
 
-	return eo.Eo.Geo.CountryCodeAlpha2, eo.Eo.ClientIp
+	return eo.Eo.Geo.CountryCodeAlpha2, eo.Eo.ClientIp, 0
 }
 
-func GetCFProxy(httpClient *http.Client) (loc string, ip string) {
+func GetCFProxy(httpClient *http.Client) (loc string, ip string, fraudScore int) {
 	url := "https://www.cloudflare.com/cdn-cgi/trace"
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -116,10 +162,10 @@ func GetCFProxy(httpClient *http.Client) (loc string, ip string) {
 			ip = strings.TrimPrefix(line, "ip=")
 		}
 	}
-	return
+	return loc, ip, 0
 }
 
-func GetIPLark(httpClient *http.Client) (loc string, ip string) {
+func GetIPLark(httpClient *http.Client) (loc string, ip string, fraudScore int) {
 	type GeoIPData struct {
 		IP      string `json:"ip"`
 		Country string `json:"country_code"`
@@ -157,10 +203,10 @@ func GetIPLark(httpClient *http.Client) (loc string, ip string) {
 		return
 	}
 
-	return geo.Country, geo.IP
+	return geo.Country, geo.IP, 0
 }
 
-func GetMe(httpClient *http.Client) (loc string, ip string) {
+func GetMe(httpClient *http.Client) (loc string, ip string, fraudScore int) {
 	type GeoIPData struct {
 		IP      string `json:"ip"`
 		Country string `json:"country_code"`
@@ -198,5 +244,5 @@ func GetMe(httpClient *http.Client) (loc string, ip string) {
 		return
 	}
 
-	return geo.Country, geo.IP
+	return geo.Country, geo.IP, 0
 }

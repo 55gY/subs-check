@@ -458,11 +458,15 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 func updateProxyName(res *Result, httpClient *ProxyClient, speed int) {
 	// 以节点IP查询位置重命名节点
 	if config.GlobalConfig.RenameNode {
-		if res.Country != "" {
-			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(res.Country)
+		var fraudScore int
+		if res.Country != "" && res.IPRisk != "" {
+			// 如果已经有 Country 和 IPRisk，从 IPRisk 推导 fraudScore
+			fraudScore = parseFraudScoreFromLabel(res.IPRisk)
+			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(res.Country, fraudScore)
 		} else {
-			country, _ := proxyutils.GetProxyCountry(httpClient.Client)
-			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(country)
+			country, _, fs := proxyutils.GetProxyCountry(httpClient.Client)
+			fraudScore = fs
+			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(country, fraudScore)
 		}
 	}
 
@@ -708,5 +712,26 @@ func (pc *ProxyClient) Close() {
 
 	if pc.BytesRead != nil {
 		TotalBytes.Add(atomic.LoadUint64(pc.BytesRead))
+	}
+}
+
+// parseFraudScoreFromLabel 从纯净度标签反推 fraudScore 数值
+// 用于当已经有 IPRisk 标签但需要 fraudScore 数值的情况
+func parseFraudScoreFromLabel(label string) int {
+	switch label {
+	case "极佳":
+		return 5  // 0-10 范围，取中间值
+	case "优秀":
+		return 20 // 11-30 范围，取中间值
+	case "良好":
+		return 40 // 31-50 范围，取中间值
+	case "中等":
+		return 60 // 51-70 范围，取中间值
+	case "差":
+		return 80 // 71-90 范围，取中间值
+	case "极差":
+		return 95 // >90，取一个较高值
+	default:
+		return 0
 	}
 }
