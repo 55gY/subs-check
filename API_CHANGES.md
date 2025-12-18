@@ -1,5 +1,70 @@
 # API 调整说明
 
+## 🔴 重大变更 - 2025年12月18日
+
+### 移除的功能
+
+1. **Sub-Store 集成**
+   - 移除了嵌入式 Sub-Store 服务
+   - 不再生成 `mihomo.yaml` 和 `base64.txt` 文件
+   - 删除所有 Sub-Store 相关配置项：
+     - `sub-store-port`
+     - `sub-store-path`
+     - `sub-store-sync-cron`
+     - `sub-store-produce-cron`
+     - `sub-store-push-service`
+     - `mihomo-overwrite-url`
+
+2. **多存储方式支持**
+   - 仅保留 `local` 本地存储方式
+   - 移除的存储方式：
+     - GitHub Gist (`gist`)
+     - Cloudflare R2 (`r2`)
+     - MinIO/S3 (`s3`)
+     - WebDAV (`webdav`)
+   - 删除相关配置项：
+     - `github-gist-id`, `github-token`, `github-api-mirror`
+     - `worker-url`, `worker-token`
+     - `s3-endpoint`, `s3-access-id`, `s3-secret-key`, `s3-bucket`, `s3-use-ssl`, `s3-bucket-lookup`
+     - `webdav-url`, `webdav-username`, `webdav-password`
+
+3. **Docker 支持**
+   - 移除 Dockerfile 和容器化支持
+   - 建议使用二进制文件直接运行或通过 systemd 管理
+
+4. **未使用的代码**
+   - 移除 `check/decay.go`（衰减函数库）
+   - 移除 `check/platform/cloudflare.go`（已弃用的 Cloudflare 检测）
+   - 移除 `check/platform/iprisk.go`（未集成的 IP 风险检测函数）
+   - 移除 `utils/shuffle.go`（通用 Shuffle 函数）
+   - 移除 `subs-check.sh`（一键安装脚本）
+
+5. **配置变更**
+   - 默认 platforms 中移除 `iprisk`（IP 风险检测仍可通过 `rename-node: true` 自动获取）
+   - Result 结构体中移除 `Cloudflare` 字段
+
+### 迁移指南
+
+**配置文件更新：**
+```yaml
+# 旧配置（不再支持）
+save-method: gist / r2 / s3 / webdav
+sub-store-port: "127.0.0.1:8299"
+
+# 新配置（仅支持）
+save-method: local
+output-dir: "./output"
+```
+
+**输出文件：**
+- 仅生成 `all.yaml`
+- 不再生成 `mihomo.yaml` 和 `base64.txt`
+
+**依赖清理：**
+- 运行 `go mod tidy` 清理 `github.com/minio/minio-go/v7` 等未使用依赖
+
+---
+
 ## 修改时间
 2025年12月7日
 

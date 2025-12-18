@@ -5,6 +5,8 @@
 </p>
 
 > **致谢**: 本项目基于 [beck-8/subs-check](https://github.com/beck-8/subs-check) 进行开发和优化。感谢原作者 beck-8 的优秀工作！
+>
+> 本仓库为 [55gY/subs-check](https://github.com/55gY/subs-check)，已进行了大量优化和功能精简。
 
 <p align="center">
   <a href="#主要特性">特性</a> •
@@ -35,13 +37,12 @@ Subs-Check 是一个轻量级、高性能的订阅节点检测工具，专为代
 - **定时检测** - 支持 cron 表达式和固定间隔两种定时模式
 - **智能失败处理** - 记录订阅获取失败次数，达到配置的重试次数后才自动删除（`remove-failed-sub` + `remove-failed-sub-retry`）
 - **热重载配置** - 配置文件修改后自动生效，无需重启
-- **订阅结果保存** - 支持本地文件、GitHub Gist、Cloudflare R2、MinIO、WebDAV 等多种存储方式
+- **订阅结果保存** - 保存到本地文件
 
 ### 🌐 Web 服务
 - **HTTP API** - 内置 Web 服务，提供订阅链接和管理接口
 - **Web 管理面板** - 可视化配置管理、实时状态监控、日志查看
 - **订阅管理 API** - 支持通过 API 动态添加/删除订阅链接
-- **Sub-Store 集成** - 支持嵌入式 Sub-Store 服务
 
 ### 💾 内存优化
 - **软内存限制** - 限制最大内存使用而不杀死进程
@@ -267,47 +268,11 @@ sub-urls:
 
 ### 结果保存配置
 
-支持多种保存方式：
+保存方式：
 
-#### 1. 本地文件（默认）
 ```yaml
 save-method: local
-save-path: "./output"
-```
-
-#### 2. GitHub Gist
-```yaml
-save-method: gist
-gist-token: "ghp_xxxxxxxxxxxxx"
-gist-id: "your-gist-id"
-```
-
-#### 3. Cloudflare R2
-```yaml
-save-method: cloudflare_r2
-r2-account-id: "your-account-id"
-r2-access-key-id: "your-access-key"
-r2-access-key-secret: "your-secret-key"
-r2-bucket-name: "your-bucket"
-```
-
-#### 4. MinIO / S3
-```yaml
-save-method: minio
-minio-endpoint: "minio.example.com:9000"
-minio-access-key: "minioadmin"
-minio-secret-key: "minioadmin"
-minio-bucket: "subs-check"
-minio-use-ssl: false
-```
-
-#### 5. WebDAV
-```yaml
-save-method: webdav
-webdav-url: "https://dav.example.com"
-webdav-username: "user"
-webdav-password: "pass"
-webdav-path: "/subs"
+output-dir: "./output"
 ```
 
 ### 完整配置示例
@@ -424,33 +389,6 @@ curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8199/api/version
 - 🔄 **手动触发检测** - 不等待定时，立即开始检测
 - 📋 **日志查看** - 查看最近的运行日志
 - 🔗 **订阅链接展示** - 复制当前服务器的订阅地址
-
-### Docker 运行
-
-```bash
-# 使用 Docker
-docker run -d \
-  --name subs-check \
-  -p 8199:8199 \
-  -v $(pwd)/config:/app/config \
-  -v $(pwd)/output:/app/output \
-  ghcr.io/55gy/subs-check:latest \
-  -f /app/config/config.yaml
-
-# 使用 Docker Compose
-version: '3'
-services:
-  subs-check:
-    image: ghcr.io/55gy/subs-check:latest
-    container_name: subs-check
-    ports:
-      - "8199:8199"
-    volumes:
-      - ./config:/app/config
-      - ./output:/app/output
-    command: -f /app/config/config.yaml
-    restart: unless-stopped
-```
 
 ## 内存管理
 
@@ -646,17 +584,6 @@ INFO 已从配置文件中删除失败的订阅: https://expired.com/sub
 - 建议在启用前备份配置文件
 - 如果订阅暂时无法访问（网络问题），也会被删除
 - 可以通过 API 或 Web 界面重新添加被删除的订阅
-
-### Sub-Store 服务
-
-启用嵌入式 Sub-Store 服务：
-
-```yaml
-enable-substore: true
-substore-port: ":3000"
-```
-
-访问：`http://localhost:3000`
 
 ### 回调通知
 

@@ -1,8 +1,8 @@
 package config
 
 import (
-	_ "embed"
 	"bufio"
+	_ "embed"
 	"fmt"
 	"os"
 	"strings"
@@ -22,20 +22,6 @@ type Config struct {
 	Timeout              int      `yaml:"timeout"`
 	FilterRegex          string   `yaml:"filter-regex"`
 	SaveMethod           string   `yaml:"save-method"`
-	WebDAVURL            string   `yaml:"webdav-url"`
-	WebDAVUsername       string   `yaml:"webdav-username"`
-	WebDAVPassword       string   `yaml:"webdav-password"`
-	GithubToken          string   `yaml:"github-token"`
-	GithubGistID         string   `yaml:"github-gist-id"`
-	GithubAPIMirror      string   `yaml:"github-api-mirror"`
-	WorkerURL            string   `yaml:"worker-url"`
-	WorkerToken          string   `yaml:"worker-token"`
-	S3Endpoint           string   `yaml:"s3-endpoint"`
-	S3AccessID           string   `yaml:"s3-access-id"`
-	S3SecretKey          string   `yaml:"s3-secret-key"`
-	S3Bucket             string   `yaml:"s3-bucket"`
-	S3UseSSL             bool     `yaml:"s3-use-ssl"`
-	S3BucketLookup       string   `yaml:"s3-bucket-lookup"`
 	SubUrlsReTry         int      `yaml:"sub-urls-retry"`
 	SubUrlsRetryInterval int      `yaml:"sub-urls-retry-interval"`
 	SubUrlsTimeout       int      `yaml:"sub-urls-timeout"`
@@ -52,12 +38,6 @@ type Config struct {
 	AppriseApiServer     string   `yaml:"apprise-api-server"`
 	RecipientUrl         []string `yaml:"recipient-url"`
 	NotifyTitle          string   `yaml:"notify-title"`
-	SubStorePort         string   `yaml:"sub-store-port"`
-	SubStorePath         string   `yaml:"sub-store-path"`
-	SubStoreSyncCron     string   `yaml:"sub-store-sync-cron"`
-	SubStorePushService  string   `yaml:"sub-store-push-service"`
-	SubStoreProduceCron  string   `yaml:"sub-store-produce-cron"`
-	MihomoOverwriteUrl   string   `yaml:"mihomo-overwrite-url"`
 	MediaCheck           bool     `yaml:"media-check"`
 	Platforms            []string `yaml:"platforms"`
 	SuccessLimit         int32    `yaml:"success-limit"`
@@ -75,8 +55,7 @@ var GlobalConfig = &Config{
 	// 新增配置，给未更改配置文件的用户一个默认值
 	ListenPort:           ":8199",
 	NotifyTitle:          "🔔 节点状态更新",
-	MihomoOverwriteUrl:   "http://127.0.0.1:8199/sub/ACL4SSR_Online_Full.yaml",
-	Platforms:            []string{"openai", "youtube", "netflix", "disney", "gemini", "iprisk"},
+	Platforms:            []string{"openai", "youtube", "netflix", "disney", "gemini"},
 	DownloadMB:           20,
 	AliveTestUrl:         "http://gstatic.com/generate_204",
 	SubUrlsGetUA:         "clash.meta (https://github.com/55gY/subs-check)",
@@ -115,14 +94,14 @@ func RemoveSubUrl(configPath, subUrl string) error {
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmedLine := strings.TrimSpace(line)
-		
+
 		// 检测 sub-urls 部分
 		if !inSubUrls && (trimmedLine == "sub-urls:" || trimmedLine == "sub-urls: []") {
 			inSubUrls = true
 			newLines = append(newLines, line)
 			continue
 		}
-		
+
 		shouldSkip := false
 		if inSubUrls {
 			// 检测缩进
@@ -146,7 +125,7 @@ func RemoveSubUrl(configPath, subUrl string) error {
 				inSubUrls = false
 			}
 		}
-		
+
 		// 只有不需要跳过的行才添加
 		if !shouldSkip {
 			newLines = append(newLines, line)
@@ -182,7 +161,7 @@ func GetFailureRecordPath() string {
 func ReadFailureRecord() (map[string]int, error) {
 	records := make(map[string]int)
 	filePath := GetFailureRecordPath()
-	
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -191,14 +170,14 @@ func ReadFailureRecord() (map[string]int, error) {
 		return records, err
 	}
 	defer file.Close()
-	
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		
+
 		parts := strings.Split(line, "|")
 		if len(parts) >= 2 {
 			url := strings.TrimSpace(parts[0])
@@ -208,31 +187,31 @@ func ReadFailureRecord() (map[string]int, error) {
 			}
 		}
 	}
-	
+
 	return records, scanner.Err()
 }
 
 // WriteFailureRecord 写入失败记录
 func WriteFailureRecord(records map[string]int) error {
 	filePath := GetFailureRecordPath()
-	
+
 	file, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	
+
 	// 写入文件头注释
 	fmt.Fprintln(file, "# 订阅链接失败记录")
 	fmt.Fprintln(file, "# 格式: URL|失败次数|最后更新时间")
 	fmt.Fprintln(file, "# 当失败次数达到配置的重试次数时，该订阅链接将被自动删除")
 	fmt.Fprintln(file, "")
-	
+
 	// 写入记录
 	for url, count := range records {
 		fmt.Fprintf(file, "%s|%d|%s\n", url, count, "")
 	}
-	
+
 	return nil
 }
 
@@ -242,17 +221,17 @@ func IncrementFailureCount(subUrl string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	// 增加失败次数
 	records[subUrl]++
 	currentCount := records[subUrl]
-	
+
 	// 保存更新后的记录
 	err = WriteFailureRecord(records)
 	if err != nil {
 		return currentCount, err
 	}
-	
+
 	return currentCount, nil
 }
 
@@ -262,30 +241,30 @@ func ResetFailureCount(subUrl string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	// 如果该URL存在失败记录，删除它
 	if _, exists := records[subUrl]; exists {
 		delete(records, subUrl)
 		return WriteFailureRecord(records)
 	}
-	
+
 	return nil
 }
 
 // ShouldRemoveFailedSub 检查是否应该删除失败的订阅
 func ShouldRemoveFailedSub(subUrl string, failureCount int) bool {
 	retryConfig := GlobalConfig.RemoveFailedSubRetry
-	
+
 	// < 0: 永不删除
 	if retryConfig < 0 {
 		return false
 	}
-	
+
 	// = 0: 失败1次就删除
 	if retryConfig == 0 {
 		return failureCount >= 1
 	}
-	
+
 	// > 0: 失败N次后删除
 	return failureCount >= retryConfig
 }

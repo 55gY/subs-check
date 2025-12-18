@@ -26,19 +26,18 @@ import (
 
 // Result 存储节点检测结果
 type Result struct {
-	Proxy      map[string]any
-	Openai     bool
-	OpenaiWeb  bool
-	Youtube    string
-	Netflix    bool
-	Google     bool
-	Cloudflare bool
-	Disney     bool
-	Gemini     bool
-	TikTok     string
-	IP         string
-	IPRisk     string
-	Country    string
+	Proxy     map[string]any
+	Openai    bool
+	OpenaiWeb bool
+	Youtube   string
+	Netflix   bool
+	Google    bool
+	Disney    bool
+	Gemini    bool
+	TikTok    string
+	IP        string
+	IPRisk    string
+	Country   string
 }
 
 type PipelineItem struct {
@@ -75,7 +74,7 @@ func Check() ([]Result, error) {
 		slog.Info(fmt.Sprintf("添加之前测试成功的节点，数量: %d", len(config.GlobalProxies)))
 		proxies = append(proxies, config.GlobalProxies...)
 	}
-	
+
 	// 启动订阅获取进度同步到全局Progress
 	subsFetchDone := make(chan struct{})
 	go func() {
@@ -96,13 +95,13 @@ func Check() ([]Result, error) {
 			}
 		}
 	}()
-	
+
 	tmp, failedSubs, successSubs, err := proxyutils.GetProxies()
 	close(subsFetchDone) // 停止进度同步
-	
+
 	// 订阅获取完成,重置订阅进度变量(标记订阅阶段结束)
 	proxyutils.SubsFetchTotal.Store(0)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("获取节点失败: %w", err)
 	}
@@ -131,7 +130,7 @@ func Check() ([]Result, error) {
 
 	config.GlobalProxies = make([]map[string]any, 0)
 	proxies = proxyutils.DeduplicateProxies(proxies)
-	
+
 	// 3. 智能乱序 (Smart Shuffle)
 	proxyutils.SmartShuffleByServer(proxies, proxyutils.ShuffleConfig{})
 	slog.Info(fmt.Sprintf("去重并乱序后节点数量: %d", len(proxies)))
@@ -141,14 +140,14 @@ func Check() ([]Result, error) {
 	mediaON := config.GlobalConfig.MediaCheck
 	progressWeight = getCheckWeight(speedON, mediaON)
 	tracker := NewProgressTracker(len(proxies))
-	
-	slog.Info("检测模式配置", 
+
+	slog.Info("检测模式配置",
 		"存活检测", true,
-		"测速检测", speedON, 
+		"测速检测", speedON,
 		"媒体检测", mediaON,
 		"最低速度(KB/s)", config.GlobalConfig.MinSpeed,
 		"测速URL", config.GlobalConfig.SpeedTestUrl)
-	
+
 	if !speedON && !mediaON {
 		slog.Info("⚡ 快速模式：仅进行存活检测（未启用测速和媒体检测）")
 	}
@@ -274,8 +273,8 @@ func Check() ([]Result, error) {
 	gcDone <- true
 	runtime.GC()
 
-	slog.Info("检测完成统计", 
-		"总节点数", len(proxies), 
+	slog.Info("检测完成统计",
+		"总节点数", len(proxies),
 		"存活节点数", tracker.aliveSuccess.Load(),
 		"测速通过数", tracker.speedSuccess.Load(),
 		"媒体检测数", tracker.mediaDone.Load(),
@@ -293,10 +292,11 @@ func getConcurrency(total int, base int, ratio float64) int {
 	if target < 1 {
 		target = 1
 	}
-	// Tanh decay: reach 90% of target at 100 proxies
-	// tanh(b * 100) = 0.9 => b = 0.015
-	decay := NewTanhDecay(target-1, 0.015, 1)
-	return RoundInt(decay(float64(total)))
+	// 简化为线性计算：根据总数调整并发数
+	if total < 100 {
+		return int(target)
+	}
+	return int(target * ratio)
 }
 
 func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut chan<- PipelineItem, resOut chan<- Result, tracker *ProgressTracker, speedON, mediaON bool) {
@@ -331,7 +331,7 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 			}
 
 			tracker.CountAlive(true)
-			
+
 			if speedON {
 				speedOut <- item
 			} else if mediaON {
@@ -359,7 +359,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				return
 			}
 			processedCount++
-			
+
 			speed, _, err := platform.CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
 			if err != nil {
 				slog.Info("测速失败", "proxy", item.ProxyMap["name"], "error", err)
@@ -373,11 +373,11 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				tracker.CountSpeed(false)
 				continue
 			}
-			
+
 			item.Speed = speed
 			tracker.CountSpeed(true)
 			slog.Info("测速通过", "proxy", item.ProxyMap["name"], "speed_kb", speed)
-			
+
 			if mediaON {
 				mediaOut <- item
 			} else {
@@ -440,10 +440,10 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 					}
 				}
 			}
-			
+
 			tracker.CountMedia()
 			updateProxyName(item.Result, item.Client, item.Speed)
-			
+
 			Available.Add(1)
 			resOut <- *item.Result
 			item.Client.Close()
@@ -557,7 +557,7 @@ func showProgress(done chan bool, total int) {
 				pct = 100
 			}
 			available := Available.Load()
-			
+
 			fmt.Printf("\r进度: [%-45s] %.1f%% (%d/%d) 可用: %d",
 				strings.Repeat("=", int(pct/2))+">",
 				pct,
@@ -643,7 +643,7 @@ func CreateClient(mapping map[string]any) *ProxyClient {
 			slog.Debug(fmt.Sprintf("CreateClient发生panic: %v, proxy: %v", r, mapping["name"]))
 		}
 	}()
-	
+
 	proxy, err := adapter.ParseProxy(mapping)
 	if err != nil {
 		slog.Debug(fmt.Sprintf("底层mihomo创建代理Client失败: %v", err))
@@ -695,7 +695,7 @@ func (pc *ProxyClient) Close() {
 			slog.Debug(fmt.Sprintf("Close发生panic: %v", r))
 		}
 	}()
-	
+
 	if pc.Client != nil {
 		pc.Client.CloseIdleConnections()
 	}
@@ -717,7 +717,7 @@ func (pc *ProxyClient) Close() {
 func parseFraudScoreFromLabel(label string) int {
 	switch label {
 	case "极佳":
-		return 5  // 0-10 范围，取中间值
+		return 5 // 0-10 范围，取中间值
 	case "优秀":
 		return 20 // 11-30 范围，取中间值
 	case "良好":

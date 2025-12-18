@@ -55,10 +55,9 @@ node-type:
   # - vmess
   # - vless
 
-# 是否开启流媒体检测，其中IP欺诈依赖重命名
+# 是否开启流媒体检测
 media-check: false
 platforms:
-  - iprisk
   - tiktok
   - youtube
   - netflix
@@ -102,71 +101,8 @@ recipient-url:
 # 自定义通知标题
 notify-title: "🔔 节点状态更新"
 
-# sub-store的启动端口，为空则不启动sub-store
-# 更新需重启程序，不可监听局域网IP，只有三种写法 :8299, 127.0.0.1:8299, 0.0.0.0:8299
-# :8299 任何可以访问到服务器的设备（包括本机和远程设备）,系统会默认绑定到所有可用 IPv4 地址
-# 127.0.0.1:8299  仅限本机。远程设备无法连接
-# 0.0.0.0:8299  任何可以访问到服务器的设备（包括本机和远程设备）。所有 IPv4 地址
-sub-store-port: "127.0.0.1:8299"
-# sub-store自定义访问路径，必须以/开头，后续访问订阅也要带上此路径
-# 设置path之后，还可以开启订阅分享功能，无需暴露真实的path
-# sub-store-path: "/path"
-sub-store-path: ""
-# 以下配置去查看sub-store相关的教程：https://hub.docker.com/r/xream/sub-store
-# sub-store同步gist定时任务
-# 定时任务指定时将订阅/文件上传到私有 Gist. 在前端, 叫做 同步 或 同步配置.
-# 55 23 * * * 每天 23 点 55 分(避开部分机场后端每天0点定时重启)
-sub-store-sync-cron: ""
-# SUB_STORE定时更新订阅
-# SUB_STORE_PRODUCE_CRON 在后台定时处理订阅. 格式为 0 */2 * * *,sub,a;0 */3 * * *,col,b, 
-# 即每 2 小时处理一次单条订阅 a, 每 3 小时处理一次组合订阅 b. 目的是定时处理订阅, 进行脚本缓存(注意, 必须在脚本参数上开启缓存). 
-# 这样在缓存有效期内, Surge 等 App 拉取订阅时就不会超时了. 格式是 cron,类型,名称 分号连接多个.
-# sub: 单条订阅, col: 组合订阅.
-sub-store-produce-cron: ""
-# sub-store推送服务地址
-# 例如：Brak: "SUB_STORE_PUSH_SERVICE=https://api.day.app/XXXXXXXXXXXX/[推送标题]/[推送内容]"
-# 注意：仅需修改 XXXXXXXXXXXX 为自己的 token，[推送标题]/[推送内容] 会被sub-store自动替换为对应的内容
-sub-store-push-service: ""
-
-
-# 覆写订阅的url，这个的作用是生成带指定规则的mihomo/clash.meta订阅链接
-# 防止网络不好，所以现在内置，依赖:8199端口
-# 如果你想替换其他的自定义覆写文件，自己命名后放在output目录，然后更改此URL后缀即可
-mihomo-overwrite-url: "http://127.0.0.1:8199/sub/ACL4SSR_Online_Full.yaml"
-
-# 保存方法
-# 目前支持的保存方法: r2, local, gist, webdav, s3
+# 保存方法（目前仅支持 local）
 save-method: local
-
-# webdav
-webdav-url: "https://example.com/dav/"
-webdav-username: "admin"
-webdav-password: "admin"
-
-# gist id
-github-gist-id: ""
-# github token
-github-token: ""
-# github api mirror
-github-api-mirror: ""
-
-# 将测速结果推送到Worker的地址
-worker-url: https://example.worker.dev
-# Worker令牌
-worker-token: 1234567890
-
-# 将测速结果推送到S3/Minio的地址
-s3-endpoint: "127.0.0.1:9000"
-# S3的访问凭证
-s3-access-id: "ak"
-s3-secret-key: "sk"
-# S3的Bucket名称
-s3-bucket: "public"
-# 是否使用SSL
-s3-use-ssl: false
-# 默认自动判断dns还是path，但一些云厂商不遵循规范，所以有时需要手动设置
-# 可选值：auto, path, dns
-s3-bucket-lookup: "auto"
 
 # 重试次数(获取订阅失败后重试次数)
 sub-urls-retry: 3
