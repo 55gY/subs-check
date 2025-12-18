@@ -19,7 +19,9 @@ func WarpUrl(url string) string {
 
 	// 处理 GitHub 代理
 	if config.GlobalConfig.GithubProxy != "" && strings.Contains(url, "raw.githubusercontent.com") {
-		url = strings.Replace(url, "https://raw.githubusercontent.com/", config.GlobalConfig.GithubProxy, 1)
+		// 在URL前面添加代理地址，而不是替换域名
+		// 例如: https://ghfast.top/https://raw.githubusercontent.com/...
+		url = config.GlobalConfig.GithubProxy + url
 	}
 
 	return url
