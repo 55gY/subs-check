@@ -332,14 +332,15 @@
                     </div>
                     <!-- 进度条区域 -->
                     <div id="progressSection" class="progress-section">
-                        <div class="progress-info">
-                            <div>任务进度: <span id="progressText">N/A</span> | 成功: <span id="successCount">N/A</span> | 失败: <span id="failedCount">N/A</span><span id="qualifiedInfo"></span></div>
-                            <div><span id="progressPercent">N/A</span></div>
-                        </div>
                         <!-- 详细统计信息 -->
-                        <div id="detailStats" style="font-size: 12px; margin: 5px 0; color: #6c757d;">
+                        <div id="detailStats" class="progress-info" style="font-size: 12px; margin: 5px 0; color: #6c757d;">
                             <span id="detailStatsText"></span>
                         </div>
+                        <div class="progress-info">
+                            <div>任务进度: <span id="progressText">N/A</span> | 成功: <span id="successCount">N/A</span> | 失败: <span id="failedCount">N/A</span></div>
+                            <div><span id="progressPercent">N/A</span></div>
+                        </div>
+                        
                         <div class="progress">
                             <div id="progressBarSuccess" class="progress-bar progress-bar-success" role="progressbar" style="width: 0%"></div>
                             <div id="progressBarTotal" class="progress-bar progress-bar-total" role="progressbar" style="width: 0%"></div>
@@ -796,14 +797,6 @@
             progressBarSuccess.style.width = `${percentSuccess}%`;
             progressBarSuccess.setAttribute('aria-valuenow', percentSuccess);
             
-            // 达标信息(仅在节点测速阶段显示)
-            const qualifiedInfo = document.getElementById('qualifiedInfo');
-            if (stage === 'nodetest' && available > 0) {
-                qualifiedInfo.textContent = ` | 达标: ${available}`;
-            } else {
-                qualifiedInfo.textContent = '';
-            }
-            
             // 显示详细统计信息
             const detailStatsText = document.getElementById('detailStatsText');
             if (detailStats) {
@@ -860,7 +853,6 @@
                         document.getElementById('progressText').textContent = 'N/A';
                         document.getElementById('successCount').textContent = 'N/A';
                         document.getElementById('failedCount').textContent = 'N/A';
-                        document.getElementById('qualifiedInfo').textContent = '';
                         document.getElementById('progressPercent').textContent = 'N/A';
                         document.getElementById('detailStatsText').textContent = '';
                         document.getElementById('progressBarTotal').style.width = '0%';
