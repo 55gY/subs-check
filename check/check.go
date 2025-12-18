@@ -169,6 +169,10 @@ func Check() ([]Result, error) {
 	mediaChan := make(chan PipelineItem, config.GlobalConfig.Concurrent)
 	resultChan := make(chan Result, len(proxies))
 
+	// 存活检测结果收集
+	var aliveResults []PipelineItem
+	var aliveResultsMutex sync.Mutex
+
 	var aliveWG, speedWG, mediaWG sync.WaitGroup
 
 	// 计算并发数 (Adaptive Concurrency)
@@ -186,30 +190,13 @@ func Check() ([]Result, error) {
 	// 设置初始阶段
 	tracker.SetStage(0, "存活检测")
 
-	// 启动 Alive Workers
+	// ===== 第1阶段：批量存活检测 =====
+	// 启动 Alive Workers (收集模式)
 	for i := 0; i < aliveConc; i++ {
 		aliveWG.Add(1)
 		go func() {
 			defer aliveWG.Done()
-			aliveWorker(ctx, aliveChan, speedChan, mediaChan, resultChan, tracker, speedON, mediaON)
-		}()
-	}
-
-	// 启动 Speed Workers
-	for i := 0; i < speedConc; i++ {
-		speedWG.Add(1)
-		go func() {
-			defer speedWG.Done()
-			speedWorker(ctx, speedChan, mediaChan, resultChan, tracker, mediaON)
-		}()
-	}
-
-	// 启动 Media Workers
-	for i := 0; i < mediaConc; i++ {
-		mediaWG.Add(1)
-		go func() {
-			defer mediaWG.Done()
-			mediaWorker(ctx, mediaChan, resultChan, tracker)
+			aliveWorkerCollect(ctx, aliveChan, &aliveResults, &aliveResultsMutex, tracker, speedON, mediaON)
 		}()
 	}
 
@@ -234,7 +221,7 @@ func Check() ([]Result, error) {
 		}
 	}()
 
-	// 发送任务
+	// 发送存活检测任务
 	go func() {
 		for _, p := range proxies {
 			aliveChan <- PipelineItem{ProxyMap: p}
@@ -242,27 +229,61 @@ func Check() ([]Result, error) {
 		close(aliveChan)
 	}()
 
-	// 级联关闭通道
+	// 等待存活检测完成
+	aliveWG.Wait()
+	slog.Info("存活检测完成", "通过数量", tracker.aliveSuccess.Load(), "总节点数", len(proxies))
+
+	// ===== 第2-3阶段：测速+媒体流水线 =====
+	// 如果没有存活节点或者不需要测速和媒体，直接返回
+	if len(aliveResults) == 0 || (!speedON && !mediaON) {
+		close(resultChan)
+		goto collectResults
+	}
+
+	// 启动 Speed Workers
+	if speedON {
+		tracker.SetStage(1, "测速检测")
+	}
+	for i := 0; i < speedConc; i++ {
+		speedWG.Add(1)
+		go func() {
+			defer speedWG.Done()
+			speedWorker(ctx, speedChan, mediaChan, resultChan, tracker, mediaON)
+		}()
+	}
+
+	// 启动 Media Workers
+	if mediaON {
+		tracker.SetStage(2, "媒体检测")
+	}
+	for i := 0; i < mediaConc; i++ {
+		mediaWG.Add(1)
+		go func() {
+			defer mediaWG.Done()
+			mediaWorker(ctx, mediaChan, resultChan, tracker)
+		}()
+	}
+
+	// 将存活节点送入测速流水线
 	go func() {
-		aliveWG.Wait()
-		slog.Info("存活检测完成，开始测速")
-		if speedON {
-			tracker.SetStage(1, "测速检测")
+		for _, item := range aliveResults {
+			speedChan <- item
 		}
 		close(speedChan)
 	}()
+
+	// 级联关闭通道
 	go func() {
 		speedWG.Wait()
 		slog.Info("测速检测完成")
-		if mediaON {
-			tracker.SetStage(2, "媒体检测")
-		}
 		close(mediaChan)
 	}()
 	go func() {
 		mediaWG.Wait()
 		close(resultChan)
 	}()
+
+collectResults:
 
 	// 收集结果
 	var results []Result
@@ -301,6 +322,54 @@ func getConcurrency(total int, base int, ratio float64) int {
 		return int(target)
 	}
 	return int(target * ratio)
+}
+
+// aliveWorkerCollect 存活检测worker（收集模式）
+func aliveWorkerCollect(ctx context.Context, in <-chan PipelineItem, results *[]PipelineItem, mutex *sync.Mutex, tracker *ProgressTracker, speedON, mediaON bool) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case item, ok := <-in:
+			if !ok {
+				return
+			}
+			if os.Getenv("SUB_CHECK_SKIP") != "" {
+				tracker.CountAlive(false)
+				continue
+			}
+
+			client := CreateClient(item.ProxyMap)
+			if client == nil {
+				slog.Debug("CreateClient失败", "proxy", item.ProxyMap["name"])
+				tracker.CountAlive(false)
+				continue
+			}
+			item.Client = client
+			item.Result = &Result{Proxy: item.ProxyMap}
+
+			google, err := platform.CheckAlive(client.Client)
+			if err != nil || !google {
+				slog.Debug("存活检测失败", "proxy", item.ProxyMap["name"], "error", err)
+				client.Close()
+				tracker.CountAlive(false)
+				continue
+			}
+
+			tracker.CountAlive(true)
+
+			// 收集存活节点，根据配置决定是否需要后续检测
+			if speedON || mediaON {
+				mutex.Lock()
+				*results = append(*results, item)
+				mutex.Unlock()
+			} else {
+				// 不需要后续检测，直接输出结果
+				// 这种情况不会走到这里，因为在主流程中已经判断
+				client.Close()
+			}
+		}
+	}
 }
 
 func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut chan<- PipelineItem, resOut chan<- Result, tracker *ProgressTracker, speedON, mediaON bool) {
