@@ -84,7 +84,7 @@ func (app *App) initHttpServer() error {
 			}
 			host := c.Request.Host
 			subpath := fmt.Sprintf("%s://%s/sub/all.yaml", scheme, host)
-			
+
 			c.HTML(http.StatusOK, "admin.html", gin.H{
 				"configPath": app.configPath,
 				"subpath":    subpath,
@@ -233,7 +233,7 @@ func (app *App) addConfig(c *gin.Context) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		newLines = append(newLines, line)
-		
+
 		// 检测 sub-urls 部分
 		if !inSubUrls && (line == "sub-urls:" || line == "sub-urls: []") {
 			inSubUrls = true
@@ -307,11 +307,11 @@ func (app *App) getStatus(c *gin.Context) {
 	// 判断是否在订阅获取阶段
 	subsTotal := proxyutils.SubsFetchTotal.Load()
 	subsProgress := proxyutils.SubsFetchProgress.Load()
-	
+
 	var available uint32
 	var failed int32
 	var stage string // "subscription" 或 "nodetest"
-	
+
 	if subsTotal > 0 && subsProgress < subsTotal {
 		// 订阅获取阶段:显示成功获取的订阅数
 		available = uint32(proxyutils.SubsFetchSuccess.Load())
@@ -324,15 +324,30 @@ func (app *App) getStatus(c *gin.Context) {
 		failed = int32(check.Progress.Load()) - int32(available)
 		stage = "nodetest"
 	}
-	
-	c.JSON(http.StatusOK, gin.H{
+
+	response := gin.H{
 		"checking":   app.checking.Load(),
 		"proxyCount": check.ProxyCount.Load(),
 		"available":  available,
 		"progress":   check.Progress.Load(),
 		"failed":     failed,
 		"stage":      stage,
-	})
+	}
+
+	// 添加详细统计信息
+	if check.CurrentTracker != nil {
+		totalNodes, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone := check.CurrentTracker.GetStats()
+		response["detailStats"] = gin.H{
+			"totalNodes":   totalNodes,
+			"aliveSuccess": aliveSuccess,
+			"aliveDone":    aliveDone,
+			"speedSuccess": speedSuccess,
+			"speedDone":    speedDone,
+			"mediaDone":    mediaDone,
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // triggerCheckHandler 手动触发检测
@@ -411,20 +426,20 @@ func (app *App) addSingleNode(nodeLink string) error {
 	if err != nil {
 		return fmt.Errorf("解析节点失败: %w", err)
 	}
-	
+
 	if len(proxies) == 0 {
 		return fmt.Errorf("未能解析出有效节点")
 	}
-	
+
 	// 2. 读取现有的all.yaml
 	saver, err := method.NewLocalSaver()
 	if err != nil {
 		return fmt.Errorf("创建保存器失败: %w", err)
 	}
-	
+
 	allYamlPath := saver.OutputPath + "/all.yaml"
 	var existingConfig map[string]any
-	
+
 	if data, err := os.ReadFile(allYamlPath); err == nil {
 		if err := yaml.Unmarshal(data, &existingConfig); err != nil {
 			return fmt.Errorf("解析all.yaml失败: %w", err)
@@ -433,7 +448,7 @@ func (app *App) addSingleNode(nodeLink string) error {
 		// 文件不存在，创建新配置
 		existingConfig = make(map[string]any)
 	}
-	
+
 	// 3. 获取现有proxies列表
 	var existingProxies []map[string]any
 	if proxiesInterface, ok := existingConfig["proxies"]; ok {
@@ -445,31 +460,31 @@ func (app *App) addSingleNode(nodeLink string) error {
 			}
 		}
 	}
-	
+
 	// 4. 检查是否已存在（使用更健壮的判断方式）
 	newProxy := proxies[0]
 	if isProxyDuplicate(newProxy, existingProxies) {
 		return fmt.Errorf("节点已存在")
 	}
-	
+
 	// 5. 添加新节点
 	existingProxies = append(existingProxies, newProxy)
 	existingConfig["proxies"] = existingProxies
-	
+
 	// 6. 写回文件
 	newData, err := yaml.Marshal(existingConfig)
 	if err != nil {
 		return fmt.Errorf("序列化配置失败: %w", err)
 	}
-	
+
 	if err := os.MkdirAll(saver.OutputPath, 0755); err != nil {
 		return fmt.Errorf("创建输出目录失败: %w", err)
 	}
-	
+
 	if err := os.WriteFile(allYamlPath, newData, 0644); err != nil {
 		return fmt.Errorf("写入all.yaml失败: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -486,9 +501,9 @@ func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any)
 		if existing["port"] != newProxy["port"] {
 			continue
 		}
-		
+
 		proxyType, _ := newProxy["type"].(string)
-		
+
 		// 2. 根据不同协议类型检查关键字段
 		switch proxyType {
 		case "vmess":
@@ -499,13 +514,13 @@ func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any)
 			if existing["alterId"] != newProxy["alterId"] {
 				continue
 			}
-			
+
 		case "vless":
 			// VLESS: server + port + uuid + flow
 			if existing["uuid"] != newProxy["uuid"] {
 				continue
 			}
-			
+
 		case "ss", "shadowsocks":
 			// Shadowsocks: server + port + cipher + password
 			if existing["cipher"] != newProxy["cipher"] {
@@ -514,7 +529,7 @@ func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any)
 			if existing["password"] != newProxy["password"] {
 				continue
 			}
-			
+
 		case "ssr":
 			// ShadowsocksR: server + port + cipher + password + protocol + obfs
 			if existing["cipher"] != newProxy["cipher"] {
@@ -529,7 +544,7 @@ func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any)
 			if existing["obfs"] != newProxy["obfs"] {
 				continue
 			}
-			
+
 		case "trojan":
 			// Trojan: server + port + password + sni
 			if existing["password"] != newProxy["password"] {
@@ -540,19 +555,19 @@ func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any)
 			if sni1 != sni2 {
 				continue
 			}
-			
+
 		case "hysteria", "hysteria2", "hy2":
 			// Hysteria: server + port + password/auth
 			pass1 := existing["password"]
 			pass2 := newProxy["password"]
 			auth1 := existing["auth"]
 			auth2 := newProxy["auth"]
-			
+
 			// password 和 auth 可能是不同字段名
 			if pass1 != pass2 && auth1 != auth2 {
 				continue
 			}
-			
+
 		case "tuic":
 			// TUIC: server + port + uuid + password
 			if existing["uuid"] != newProxy["uuid"] {
@@ -561,17 +576,17 @@ func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any)
 			if existing["password"] != newProxy["password"] {
 				continue
 			}
-			
+
 		default:
 			// 其他协议：比较 server + port + name
 			if existing["name"] != newProxy["name"] {
 				continue
 			}
 		}
-		
+
 		// 所有关键字段都匹配，判定为重复
 		return true
 	}
-	
+
 	return false
 }

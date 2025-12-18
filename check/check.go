@@ -54,6 +54,9 @@ var TotalBytes atomic.Uint64
 
 var ForceClose atomic.Bool
 
+// CurrentTracker 当前的进度追踪器，用于Web API访问
+var CurrentTracker *ProgressTracker
+
 var Bucket *ratelimit.Bucket
 
 var progressWeight ProgressWeight
@@ -140,6 +143,7 @@ func Check() ([]Result, error) {
 	mediaON := config.GlobalConfig.MediaCheck
 	progressWeight = getCheckWeight(speedON, mediaON)
 	tracker := NewProgressTracker(len(proxies))
+	CurrentTracker = tracker // 保存到全局变量供Web API使用
 
 	slog.Info("检测模式配置",
 		"存活检测", true,
@@ -333,8 +337,12 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 			tracker.CountAlive(true)
 
 			if speedON {
+				// 预先增加测速计数，避免节点在通道中时的计数盲区
+				tracker.speedDone.Add(1)
 				speedOut <- item
 			} else if mediaON {
+				// 预先增加媒体计数，避免节点在通道中时的计数盲区
+				tracker.mediaDone.Add(1)
 				mediaOut <- item
 			} else {
 				updateProxyName(item.Result, client, 0)
@@ -362,13 +370,13 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 
 			speed, _, err := platform.CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
 			if err != nil {
-				slog.Info("测速失败", "proxy", item.ProxyMap["name"], "error", err)
+				// slog.Info("测速失败", "proxy", item.ProxyMap["name"], "error", err)
 				item.Client.Close()
 				tracker.CountSpeed(false)
 				continue
 			}
 			if speed < config.GlobalConfig.MinSpeed {
-				slog.Info("测速未达标", "proxy", item.ProxyMap["name"], "speed_kb", speed, "min_required", config.GlobalConfig.MinSpeed)
+				// slog.Info("测速未达标", "proxy", item.ProxyMap["name"], "speed_kb", speed, "min_required", config.GlobalConfig.MinSpeed)
 				item.Client.Close()
 				tracker.CountSpeed(false)
 				continue
@@ -376,9 +384,11 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 
 			item.Speed = speed
 			tracker.CountSpeed(true)
-			slog.Info("测速通过", "proxy", item.ProxyMap["name"], "speed_kb", speed)
+			// slog.Info("测速通过", "proxy", item.ProxyMap["name"], "speed_kb", speed)
 
 			if mediaON {
+				// 预先增加媒体计数，避免节点在通道中时的计数盲区
+				tracker.mediaDone.Add(1)
 				mediaOut <- item
 			} else {
 				updateProxyName(item.Result, item.Client, speed)

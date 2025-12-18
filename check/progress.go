@@ -4,7 +4,7 @@ import (
 	"math"
 	"sync/atomic"
 )
- 
+
 // 默认使用动态权重显示进度条
 var progressAlgorithm ProgressAlgorithm
 
@@ -44,7 +44,7 @@ type ProgressTracker struct {
 
 	// 当前处于 测活-测速-媒体检测 阶段 (0=存活, 1=测速, 2=媒体)
 	currentStage atomic.Int32
-	
+
 	// 当前阶段名称
 	stageName atomic.Value // string
 
@@ -112,6 +112,16 @@ func (pt *ProgressTracker) CountMedia() {
 	pt.refresh()
 }
 
+// GetStats 获取当前统计信息（供API使用）
+func (pt *ProgressTracker) GetStats() (totalNodes, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone int32) {
+	return pt.totalJobs.Load(),
+		pt.aliveSuccess.Load(),
+		pt.aliveDone.Load(),
+		pt.speedSuccess.Load(),
+		pt.speedDone.Load(),
+		pt.mediaDone.Load()
+}
+
 // refresh 计算并更新全局进度。
 func (pt *ProgressTracker) refresh() {
 	total := float64(pt.totalJobs.Load())
@@ -123,17 +133,17 @@ func (pt *ProgressTracker) refresh() {
 	// 注意：分母是 total，意味着假设所有节点都通过了前一阶段
 	// 实际上，后续阶段的任务数会少于 total，但这正是动态权重的意义所在：
 	// 失败的节点在早期阶段就被视为“完成了后续所有阶段的进度贡献”
-	
+
 	// 修正逻辑：
 	// 存活检测失败的节点，视为完成了测速和媒体检测
 	// 测速失败的节点，视为完成了媒体检测
-	
+
 	aliveDone := float64(pt.aliveDone.Load())
 	aliveFail := aliveDone - float64(pt.aliveSuccess.Load())
-	
+
 	speedDone := float64(pt.speedDone.Load())
 	speedFail := speedDone - float64(pt.speedSuccess.Load())
-	
+
 	mediaDone := float64(pt.mediaDone.Load())
 
 	// 计算加权进度
@@ -148,7 +158,7 @@ func (pt *ProgressTracker) refresh() {
 	pMedia := ((mediaDone + speedFail + aliveFail) / total) * progressWeight.media
 
 	currentProgress := pAlive + pSpeed + pMedia
-	
+
 	// 限制在 100% 以内
 	if currentProgress > 100 {
 		currentProgress = 100
@@ -160,10 +170,10 @@ func (pt *ProgressTracker) refresh() {
 	// 这里我们需要适配原有的 showProgress 或者重写它
 	// 假设我们重写 showProgress 来直接读取 Progress 作为百分比
 	// 或者我们这里反向计算出一个虚拟的 "current" 值
-	
+
 	virtualCurrent := int32(currentProgress / 100.0 * total)
 	Progress.Store(uint32(virtualCurrent))
-	
+
 	// 也可以直接存储百分比，修改 check.go 中的 showProgress
 }
 
@@ -179,7 +189,7 @@ func (pt *ProgressTracker) GetStageInfo() (stage int32, name string, done, succe
 	if v := pt.stageName.Load(); v != nil {
 		name = v.(string)
 	}
-	
+
 	switch stage {
 	case 0: // 存活检测
 		done = pt.aliveDone.Load()
