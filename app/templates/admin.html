@@ -828,8 +828,8 @@
         
         // 更新状态
         function updateStatus() {
-            fetch('/api/status', {、stage和detailStats参数
-                        updateProgressBar(data.proxyCount, data.progress, data.available, data.failed, data.stage, data.detailStats
+            fetch('/api/status', {
+                headers: addApiKeyHeader()
             })
             .then(response => {
                 if (handleUnauthorized(response, false)) {
@@ -841,8 +841,7 @@
                 if (data) {
                     const statusContainer = document.getElementById('statusContainer');
                     const statusIcon = document.getElementById('statusIcon');
-                    const statusText = document.gdetailStatsText').textContent = '';
-                        document.getElementById('etElementById('nextCheckTime');
+                    const statusText = document.getElementById('nextCheckTime');
                     
                     // 更新状态
                     if (data.checking) {
@@ -850,8 +849,8 @@
                         statusIcon.className = 'bi bi-arrow-repeat me-1 rotate-animation';
                         statusText.textContent = '正在检测中...';
                         
-                        // 更新进度条 - 传递failed和stage参数
-                        updateProgressBar(data.proxyCount, data.progress, data.available, data.failed, data.stage);
+                        // 更新进度条 - 传递failed、stage和detailStats参数
+                        updateProgressBar(data.proxyCount, data.progress, data.available, data.failed, data.stage, data.detailStats);
                     } else {
                         statusContainer.className = 'text-success';
                         statusIcon.className = 'bi bi-check-circle me-1';
@@ -863,6 +862,7 @@
                         document.getElementById('failedCount').textContent = 'N/A';
                         document.getElementById('qualifiedInfo').textContent = '';
                         document.getElementById('progressPercent').textContent = 'N/A';
+                        document.getElementById('detailStatsText').textContent = '';
                         document.getElementById('progressBarTotal').style.width = '0%';
                         document.getElementById('progressBarSuccess').style.width = '0%';
                     }
