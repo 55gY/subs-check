@@ -232,10 +232,53 @@ func Check() ([]Result, error) {
 		slog.Info("所有存活检测任务已发送", "发送数量", sentCount)
 	}()
 
+	// 定期报告存活检测进度
+	progressTicker := time.NewTicker(30 * time.Second)
+	progressDone := make(chan bool)
+	go func() {
+		defer progressTicker.Stop()
+		for {
+			select {
+			case <-progressDone:
+				return
+			case <-progressTicker.C:
+				processed := tracker.aliveDone.Load()
+				success := tracker.aliveSuccess.Load()
+				percent := float64(processed) / float64(len(proxies)) * 100
+				slog.Info("存活检测进度报告", 
+					"已处理", processed, 
+					"总数", len(proxies),
+					"通过", success,
+					"进度", fmt.Sprintf("%.1f%%", percent))
+			}
+		}
+	}()
+
 	// 等待存活检测完成
-	slog.Info("等待存活检测完成...")
-	aliveWG.Wait()
-	slog.Info("存活检测完成", "通过数量", tracker.aliveSuccess.Load(), "总节点数", len(proxies), "收集节点数", len(aliveResults))
+	slog.Info("等待存活检测完成...", "启动的workers", aliveConc)
+	
+	// 添加超时保护，防止永久卡住
+	done := make(chan bool)
+	go func() {
+		aliveWG.Wait()
+		done <- true
+	}()
+	
+	// 最多等待10分钟，如果还没完成则强制继续
+	timeout := time.After(10 * time.Minute)
+	select {
+	case <-done:
+		progressDone <- true // 停止进度报告
+		slog.Info("存活检测完成", "通过数量", tracker.aliveSuccess.Load(), "总节点数", len(proxies), "收集节点数", len(aliveResults))
+	case <-timeout:
+		progressDone <- true // 停止进度报告
+		slog.Warn("存活检测超时！强制继续", 
+			"已处理", tracker.aliveDone.Load(), 
+			"总数", len(proxies), 
+			"通过数量", tracker.aliveSuccess.Load(),
+			"收集节点数", len(aliveResults),
+			"可能有worker卡住")
+	}
 
 	// ===== 第2-3阶段：测速+媒体流水线 =====
 	// 如果没有存活节点或者不需要测速和媒体，直接返回
