@@ -360,6 +360,13 @@ func aliveWorkerCollect(ctx context.Context, in <-chan PipelineItem, results *[]
 
 			// 收集存活节点，根据配置决定是否需要后续检测
 			if speedON || mediaON {
+				// 预先增加后续阶段计数，避免节点在内存列表中等待时的计数盲区
+				// 这样在批量发送到下一阶段前，进度条就能显示这些节点已经在处理流程中
+				if speedON {
+					tracker.speedDone.Add(1)
+				} else if mediaON {
+					tracker.mediaDone.Add(1)
+				}
 				mutex.Lock()
 				*results = append(*results, item)
 				mutex.Unlock()

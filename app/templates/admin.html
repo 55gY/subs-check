@@ -804,6 +804,11 @@
                 
                 if (detailStats.aliveSuccess !== undefined && detailStats.aliveDone > 0) {
                     text += ` | 存活=${detailStats.aliveSuccess}`;
+                    
+                    // 添加阶段过渡提示：当存活检测完成但后续检测尚未开始时显示准备中状态
+                    if (detailStats.aliveDone === detailStats.totalNodes && detailStats.speedDone === 0 && stage !== '存活检测') {
+                        text += ` | 正在准备${stage}...`;
+                    }
                 }
                 if (detailStats.speedSuccess !== undefined && detailStats.speedDone > 0) {
                     text += ` | 测速通过=${detailStats.speedSuccess}`;
@@ -894,9 +899,7 @@
         
         // 定时刷新
         setInterval(loadLogs, 10000);
-        setInterval(updateStatus, 5000);
-        
-        // 获取版本信息
+		setInterval(updateStatus, 2000); // 从5秒改为2秒，提高进度更新响应性
         function getVersionInfo() {
             fetch('/api/version', {
                 headers: addApiKeyHeader()
