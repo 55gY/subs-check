@@ -3,6 +3,7 @@ package check
 import (
 	"math"
 	"sync/atomic"
+	"time"
 )
 
 // 默认使用动态权重显示进度条
