@@ -258,16 +258,16 @@ func Check() ([]Result, error) {
 	slog.Info("等待存活检测完成...", "启动的workers", aliveConc)
 	
 	// 添加超时保护，防止永久卡住
-	done := make(chan bool)
+	aliveWaitDone := make(chan bool)
 	go func() {
 		aliveWG.Wait()
-		done <- true
+		aliveWaitDone <- true
 	}()
 	
 	// 最多等待10分钟，如果还没完成则强制继续
 	timeout := time.After(10 * time.Minute)
 	select {
-	case <-done:
+	case <-aliveWaitDone:
 		progressDone <- true // 停止进度报告
 		slog.Info("存活检测完成", "通过数量", tracker.aliveSuccess.Load(), "总节点数", len(proxies), "收集节点数", len(aliveResults))
 	case <-timeout:
