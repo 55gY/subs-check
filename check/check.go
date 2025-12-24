@@ -245,17 +245,38 @@ func Check() ([]Result, error) {
 				processed := tracker.aliveDone.Load()
 				success := tracker.aliveSuccess.Load()
 				percent := float64(processed) / float64(len(proxies)) * 100
-				slog.Info("存活检测进度报告", 
-					"已处理", processed, 
-					"总数", len(proxies),
-					"通过", success,
-					"进度", fmt.Sprintf("%.1f%%", percent))
+				remaining := tracker.GetTimeoutRemaining()
+				if remaining > 0 {
+					slog.Info("存活检测进度报告", 
+						"已处理", processed, 
+						"总数", len(proxies),
+						"通过", success,
+						"进度", fmt.Sprintf("%.1f%%", percent),
+						"超时倒计时", fmt.Sprintf("%ds", remaining))
+				} else {
+					slog.Info("存活检测进度报告", 
+						"已处理", processed, 
+						"总数", len(proxies),
+						"通过", success,
+						"进度", fmt.Sprintf("%.1f%%", percent))
+				}
 			}
 		}
 	}()
 
 	// 等待存活检测完成
 	slog.Info("等待存活检测完成...", "启动的workers", aliveConc)
+	
+	// 计算合理的超时时间并设置到tracker
+	expectedTime := time.Duration(len(proxies)/aliveConc*config.GlobalConfig.Timeout)*time.Millisecond + 60*time.Second
+	if expectedTime < 2*time.Minute {
+		expectedTime = 2 * time.Minute // 最少2分钟
+	}
+	if expectedTime > 5*time.Minute {
+		expectedTime = 5 * time.Minute // 最多5分钟
+	}
+	tracker.SetTimeout(expectedTime)
+	slog.Info("设置存活检测超时", "预计时间", expectedTime.String())
 	
 	// 添加超时保护，防止永久卡住
 	aliveWaitDone := make(chan bool)
@@ -264,13 +285,14 @@ func Check() ([]Result, error) {
 		aliveWaitDone <- true
 	}()
 	
-	// 最多等待10分钟，如果还没完成则强制继续
-	timeout := time.After(10 * time.Minute)
+	timeout := time.After(expectedTime)
 	select {
 	case <-aliveWaitDone:
+		tracker.ClearTimeout() // 清除超时信息
 		progressDone <- true // 停止进度报告
 		slog.Info("存活检测完成", "通过数量", tracker.aliveSuccess.Load(), "总节点数", len(proxies), "收集节点数", len(aliveResults))
 	case <-timeout:
+		tracker.ClearTimeout() // 清除超时信息
 		progressDone <- true // 停止进度报告
 		slog.Warn("存活检测超时！强制继续", 
 			"已处理", tracker.aliveDone.Load(), 

@@ -816,6 +816,18 @@
                 if (detailStats.mediaDone !== undefined && detailStats.mediaDone > 0) {
                     text += ` | 媒体检测=${detailStats.mediaDone}`;
                 }
+                
+                // 显示超时倒计时
+                if (detailStats.timeoutRemaining !== undefined && detailStats.timeoutRemaining > 0) {
+                    const minutes = Math.floor(detailStats.timeoutRemaining / 60);
+                    const seconds = detailStats.timeoutRemaining % 60;
+                    if (minutes > 0) {
+                        text += ` | ⏱️ 超时倒计时: ${minutes}分${seconds}秒`;
+                    } else {
+                        text += ` | ⏱️ 超时倒计时: ${seconds}秒`;
+                    }
+                }
+                
                 text += ` | 可用数=${available}`;
                 
                 detailStatsText.textContent = text;

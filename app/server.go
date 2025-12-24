@@ -337,13 +337,15 @@ func (app *App) getStatus(c *gin.Context) {
 	// 添加详细统计信息
 	if check.CurrentTracker != nil {
 		totalNodes, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone := check.CurrentTracker.GetStats()
+		timeoutRemaining := check.CurrentTracker.GetTimeoutRemaining()
 		response["detailStats"] = gin.H{
-			"totalNodes":   totalNodes,
-			"aliveSuccess": aliveSuccess,
-			"aliveDone":    aliveDone,
-			"speedSuccess": speedSuccess,
-			"speedDone":    speedDone,
-			"mediaDone":    mediaDone,
+			"totalNodes":       totalNodes,
+			"aliveSuccess":     aliveSuccess,
+			"aliveDone":        aliveDone,
+			"speedSuccess":     speedSuccess,
+			"speedDone":        speedDone,
+			"mediaDone":        mediaDone,
+			"timeoutRemaining": timeoutRemaining, // 超时倒计时（秒）
 		}
 	}
 

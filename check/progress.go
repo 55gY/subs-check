@@ -50,6 +50,10 @@ type ProgressTracker struct {
 
 	// 确保进度条输出完成
 	finalized atomic.Bool
+
+	// 超时倒计时相关
+	timeoutStartTime atomic.Value // time.Time
+	timeoutDuration  atomic.Value // time.Duration
 }
 
 // NewProgressTracker 初始化进度追踪器并重置外部原子变量。
@@ -181,6 +185,33 @@ func (pt *ProgressTracker) refresh() {
 func (pt *ProgressTracker) SetStage(stage int32, name string) {
 	pt.currentStage.Store(stage)
 	pt.stageName.Store(name)
+}
+
+// SetTimeout 设置超时信息
+func (pt *ProgressTracker) SetTimeout(duration time.Duration) {
+	pt.timeoutStartTime.Store(time.Now())
+	pt.timeoutDuration.Store(duration)
+}
+
+// GetTimeoutRemaining 获取剩余超时时间（秒）
+func (pt *ProgressTracker) GetTimeoutRemaining() int {
+	startTime, ok1 := pt.timeoutStartTime.Load().(time.Time)
+	duration, ok2 := pt.timeoutDuration.Load().(time.Duration)
+	if !ok1 || !ok2 {
+		return 0
+	}
+	elapsed := time.Since(startTime)
+	remaining := duration - elapsed
+	if remaining < 0 {
+		return 0
+	}
+	return int(remaining.Seconds())
+}
+
+// ClearTimeout 清除超时信息
+func (pt *ProgressTracker) ClearTimeout() {
+	pt.timeoutStartTime.Store(time.Time{})
+	pt.timeoutDuration.Store(time.Duration(0))
 }
 
 // GetStageInfo 获取当前阶段信息
