@@ -268,15 +268,18 @@ func Check() ([]Result, error) {
 	slog.Info("等待存活检测完成...", "启动的workers", aliveConc)
 	
 	// 计算合理的超时时间并设置到tracker
-	expectedTime := time.Duration(len(proxies)/aliveConc*config.GlobalConfig.Timeout)*time.Millisecond + 60*time.Second
-	if expectedTime < 2*time.Minute {
-		expectedTime = 2 * time.Minute // 最少2分钟
+	// 基础时间 = (节点数 / 并发数 * 单节点超时) + 缓冲时间
+	baseTime := time.Duration(len(proxies)/aliveConc*config.GlobalConfig.Timeout)*time.Millisecond + 60*time.Second
+	// 乘以5倍安全系数，考虑网络波动和worker调度延迟
+	expectedTime := baseTime * 5
+	if expectedTime < 5*time.Minute {
+		expectedTime = 5 * time.Minute // 最少5分钟
 	}
-	if expectedTime > 5*time.Minute {
-		expectedTime = 5 * time.Minute // 最多5分钟
+	if expectedTime > 30*time.Minute {
+		expectedTime = 30 * time.Minute // 最多30分钟
 	}
 	tracker.SetTimeout(expectedTime)
-	slog.Info("设置存活检测超时", "预计时间", expectedTime.String())
+	slog.Info("设置存活检测超时", "预计时间", expectedTime.String(), "基础时间", baseTime.String())
 	
 	// 添加超时保护，防止永久卡住
 	aliveWaitDone := make(chan bool)
@@ -294,12 +297,16 @@ func Check() ([]Result, error) {
 	case <-timeout:
 		tracker.ClearTimeout() // 清除超时信息
 		progressDone <- true // 停止进度报告
+		未完成节点数 := len(proxies) - int(tracker.aliveDone.Load())
 		slog.Warn("存活检测超时！强制继续", 
 			"已处理", tracker.aliveDone.Load(), 
+			"未完成", 未完成节点数,
 			"总数", len(proxies), 
 			"通过数量", tracker.aliveSuccess.Load(),
 			"收集节点数", len(aliveResults),
-			"可能有worker卡住")
+			"说明", "未完成的节点可能正在处理中，将在后台继续运行直到超时")
+		// 注意：卡住的worker会在各自的HTTP超时后自动退出
+		// 不强制取消context，因为后续的测速和媒体检测还需要使用
 	}
 
 	// ===== 第2-3阶段：测速+媒体流水线 =====
