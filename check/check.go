@@ -322,15 +322,27 @@ collectResults:
 }
 
 func getConcurrency(total int, base int, ratio float64) int {
+	// 根据 ratio 调整基础并发数
 	target := float64(base) * ratio
 	if target < 1 {
 		target = 1
 	}
-	// 简化为线性计算：根据总数调整并发数
+	
+	// 根据节点总数自适应调整并发数
+	// 节点少于100时使用较低并发避免资源浪费
+	// 节点较多时使用完整的 target 值提高处理速度
 	if total < 100 {
-		return int(target)
+		// 节点较少时，并发数按节点数比例缩减
+		scale := float64(total) / 100.0
+		result := int(target * scale)
+		if result < 1 {
+			return 1
+		}
+		return result
 	}
-	return int(target * ratio)
+	
+	// 节点数 ≥100 时，使用完整的 target 并发数
+	return int(target)
 }
 
 // aliveWorkerCollect 存活检测worker（收集模式）
