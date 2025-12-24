@@ -223,15 +223,19 @@ func Check() ([]Result, error) {
 
 	// 发送存活检测任务
 	go func() {
+		sentCount := 0
 		for _, p := range proxies {
 			aliveChan <- PipelineItem{ProxyMap: p}
+			sentCount++
 		}
 		close(aliveChan)
+		slog.Info("所有存活检测任务已发送", "发送数量", sentCount)
 	}()
 
 	// 等待存活检测完成
+	slog.Info("等待存活检测完成...")
 	aliveWG.Wait()
-	slog.Info("存活检测完成", "通过数量", tracker.aliveSuccess.Load(), "总节点数", len(proxies))
+	slog.Info("存活检测完成", "通过数量", tracker.aliveSuccess.Load(), "总节点数", len(proxies), "收集节点数", len(aliveResults))
 
 	// ===== 第2-3阶段：测速+媒体流水线 =====
 	// 如果没有存活节点或者不需要测速和媒体，直接返回
@@ -242,8 +246,10 @@ func Check() ([]Result, error) {
 
 	// 启动 Speed Workers
 	if speedON {
+		slog.Info("切换到测速检测阶段")
 		tracker.SetStage(1, "测速检测")
 	}
+	slog.Info("启动测速workers", "数量", speedConc)
 	for i := 0; i < speedConc; i++ {
 		speedWG.Add(1)
 		go func() {
@@ -254,8 +260,10 @@ func Check() ([]Result, error) {
 
 	// 启动 Media Workers
 	if mediaON {
+		slog.Info("切换到媒体检测阶段")
 		tracker.SetStage(2, "媒体检测")
 	}
+	slog.Info("启动媒体workers", "数量", mediaConc)
 	for i := 0; i < mediaConc; i++ {
 		mediaWG.Add(1)
 		go func() {
