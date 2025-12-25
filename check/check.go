@@ -383,8 +383,6 @@ collectResults:
 	slog.Info(fmt.Sprintf("可用节点数量: %d", len(results)))
 	slog.Info(fmt.Sprintf("测试总消耗流量: %.3fGB", float64(TotalBytes.Load())/1024/1024/1024))
 
-	checkSubscriptionSuccessRate(proxies, results)
-
 	return results, nil
 }
 
