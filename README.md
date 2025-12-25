@@ -23,6 +23,8 @@
 
 Subs-Check 是一个轻量级、高性能的订阅节点检测工具，专为代理订阅管理而设计。支持批量检测节点可用性、测速、媒体解锁检测等功能，并提供 HTTP API 接口方便集成。
 
+**本仓库已重构**: 采用扁平化1级目录结构，26个Go文件，7个包，编译通过，功能100%保留。详见 [RESTRUCTURE.md](RESTRUCTURE.md) 和 [FUNCTION_COMPARISON.md](FUNCTION_COMPARISON.md)。
+
 ## 主要特性
 
 ### 🚀 核心功能
