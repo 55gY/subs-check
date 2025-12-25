@@ -73,10 +73,6 @@ func Check() ([]Result, error) {
 
 	// 1. 获取节点
 	var proxies []map[string]any
-	if config.GlobalConfig.KeepSuccessProxies {
-		slog.Info(fmt.Sprintf("添加之前测试成功的节点，数量: %d", len(config.GlobalProxies)))
-		proxies = append(proxies, config.GlobalProxies...)
-	}
 
 	// 启动订阅获取进度同步到全局Progress
 	subsFetchDone := make(chan struct{})
@@ -131,7 +127,6 @@ func Check() ([]Result, error) {
 		}
 	}
 
-	config.GlobalProxies = make([]map[string]any, 0)
 	proxies = proxyutils.DeduplicateProxies(proxies)
 
 	// 3. 智能乱序 (Smart Shuffle)

@@ -20,48 +20,44 @@ type Config struct {
 	TotalSpeedLimit      int      `yaml:"total-speed-limit"`
 	MinSpeed             int      `yaml:"min-speed"`
 	Timeout              int      `yaml:"timeout"`
-	SaveMethod           string   `yaml:"save-method"`
 	SubUrlsReTry         int      `yaml:"sub-urls-retry"`
 	SubUrlsRetryInterval int      `yaml:"sub-urls-retry-interval"`
 	SubUrlsTimeout       int      `yaml:"sub-urls-timeout"`
 	SubUrlsGetUA         string   `yaml:"sub-urls-get-ua"`
 	SubUrlsRemote        []string `yaml:"sub-urls-remote"`
 	SubUrls              []string `yaml:"sub-urls"`
-	SuccessRate          float32  `yaml:"success-rate"`
-	ListenPort           string   `yaml:"listen-port"`
-	RenameNode           bool     `yaml:"rename-node"`
-	KeepSuccessProxies   bool     `yaml:"keep-success-proxies"`
-	OutputDir            string   `yaml:"output-dir"`
-	AppriseApiServer     string   `yaml:"apprise-api-server"`
-	RecipientUrl         []string `yaml:"recipient-url"`
-	NotifyTitle          string   `yaml:"notify-title"`
-	MediaCheck           bool     `yaml:"media-check"`
-	Platforms            []string `yaml:"platforms"`
-	NodePrefix           string   `yaml:"node-prefix"`
-	NodeType             []string `yaml:"node-type"`
-	EnableWebUI          bool     `yaml:"enable-web-ui"`
-	APIKey               string   `yaml:"api-key"`
-	GithubProxy          string   `yaml:"github-proxy"`
-	Proxy                string   `yaml:"proxy"`
-	CallbackScript       string   `yaml:"callback-script"`
-	RemoveFailedSubRetry int      `yaml:"remove-failed-sub-retry"`
+	ListenPort            string   `yaml:"listen-port"`
+	RenameNode            bool     `yaml:"rename-node"`
+	OutputDir             string   `yaml:"output-dir"`
+	AppriseApiServer      string   `yaml:"apprise-api-server"`
+	RecipientUrl          []string `yaml:"recipient-url"`
+	NotifyTitle           string   `yaml:"notify-title"`
+	MediaCheck            bool     `yaml:"media-check"`
+	Platforms             []string `yaml:"platforms"`
+	NodePrefix            string   `yaml:"node-prefix"`
+	NodeType              []string `yaml:"node-type"`
+	EnableWebUI           bool     `yaml:"enable-web-ui"`
+	APIKey                string   `yaml:"api-key"`
+	GithubProxy           string   `yaml:"github-proxy"`
+	Proxy                 string   `yaml:"proxy"`
+	SubUrlsRetryFailed    int      `yaml:"sub-urls-retry-failed"`
+	SubUrlsMinNodeCount   int      `yaml:"sub-urls-min-node-count"`
 }
 
 var GlobalConfig = &Config{
 	// 新增配置，给未更改配置文件的用户一个默认值
-	ListenPort:           ":8199",
-	NotifyTitle:          "🔔 节点状态更新",
-	Platforms:            []string{"openai", "youtube", "netflix", "disney", "gemini"},
-	DownloadMB:           20,
-	AliveTestUrl:         "http://gstatic.com/generate_204",
-	SubUrlsGetUA:         "clash.meta (https://github.com/55gY/subs-check)",
-	RemoveFailedSubRetry: -1, // 默认永不删除，避免误删用户订阅
+	ListenPort:          ":8199",
+	NotifyTitle:         "🔔 节点状态更新",
+	Platforms:           []string{"openai", "youtube", "netflix", "disney", "gemini"},
+	DownloadMB:          20,
+	AliveTestUrl:        "http://gstatic.com/generate_204",
+	SubUrlsGetUA:        "clash.meta (https://github.com/55gY/subs-check)",
+	SubUrlsRetryFailed:  -1, // 默认永不删除，避免误删用户订阅
+	SubUrlsMinNodeCount: 0,  // 默认不启用节点数量检查
 }
 
 //go:embed config.example.yaml
 var DefaultConfigTemplate []byte
-
-var GlobalProxies []map[string]any
 
 // GlobalConfigPath 全局配置文件路径
 var GlobalConfigPath string
@@ -249,7 +245,7 @@ func ResetFailureCount(subUrl string) error {
 
 // ShouldRemoveFailedSub 检查是否应该删除失败的订阅
 func ShouldRemoveFailedSub(subUrl string, failureCount int) bool {
-	retryConfig := GlobalConfig.RemoveFailedSubRetry
+	retryConfig := GlobalConfig.SubUrlsRetryFailed
 
 	// < 0: 永不删除
 	if retryConfig < 0 {

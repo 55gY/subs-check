@@ -55,7 +55,7 @@ func (cs *ConfigSaver) Save() error {
 	// 保存各个类别的代理
 	for _, category := range cs.categories {
 		if err := cs.saveCategory(category); err != nil {
-			slog.Error(fmt.Sprintf("保存到%s失败: %v", config.GlobalConfig.SaveMethod, err))
+			slog.Error(fmt.Sprintf("保存失败: %v", err))
 			continue
 		}
 	}
@@ -77,7 +77,7 @@ func (cs *ConfigSaver) categorizeProxies() {
 // saveCategory 保存单个类别的代理
 func (cs *ConfigSaver) saveCategory(category ProxyCategory) error {
 	if len(category.Proxies) == 0 {
-		slog.Warn(fmt.Sprintf("yaml节点为空，跳过保存: %s, saveMethod: %s", category.Name, config.GlobalConfig.SaveMethod))
+		slog.Warn(fmt.Sprintf("yaml节点为空，跳过保存: %s", category.Name))
 		return nil
 	}
 

@@ -127,6 +127,9 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 			defer func() { <-concurrentLimit }() // 释放令牌
 			defer completedTotal.Add(1)
 
+			// 节点计数器：nodeCountTotal(过滤前), nodeCountValid(过滤后)
+			var nodeCountTotal, nodeCountValid int
+
 			// 使用 WarpUrl 处理后的 URL 获取数据
 			actualUrl := utils.WarpUrl(url)
 			data, err := GetDateFromSubs(actualUrl)
@@ -158,14 +161,26 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					// 最终回退：将按 URL 猜测协议头处理纯文本/数组
 						if guessed := convertUnStandandTextViaConvert(url, data); len(guessed) > 0 {
 							for _, proxy := range guessed {
+								nodeCountTotal++
 								if t, ok := proxy["type"].(string); ok {
 									if len(config.GlobalConfig.NodeType) > 0 && !lo.Contains(config.GlobalConfig.NodeType, t) {
 										continue
 									}
 								}
+								nodeCountValid++
 								proxy["sub_url"] = url
 								proxy["sub_tag"] = tag
 								proxyChan <- proxy
+							}
+							// 检查节点数量是否满足最低要求
+							if config.GlobalConfig.SubUrlsMinNodeCount > 0 && nodeCountValid < config.GlobalConfig.SubUrlsMinNodeCount {
+								slog.Warn("订阅节点数量不足，已标记为失败",
+									"url", url,
+									"过滤前节点数", nodeCountTotal,
+									"过滤后节点数", nodeCountValid,
+									"最低要求", config.GlobalConfig.SubUrlsMinNodeCount)
+								markFailed(url)
+								return
 							}
 							markSuccess(url)
 							return
@@ -176,20 +191,32 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 						return
 					}
 				}
-				markSuccess(url)
 				for _, proxy := range proxyList {
+					nodeCountTotal++
 					// 只测试指定协议
 					if t, ok := proxy["type"].(string); ok {
 						if len(config.GlobalConfig.NodeType) > 0 && !lo.Contains(config.GlobalConfig.NodeType, t) {
 							continue
 						}
 					}
+					nodeCountValid++
 
 					// 为每个节点添加订阅链接来源信息和备注
 					proxy["sub_url"] = url
 					proxy["sub_tag"] = tag
 					proxyChan <- proxy
 				}
+				// 检查节点数量是否满足最低要求
+				if config.GlobalConfig.SubUrlsMinNodeCount > 0 && nodeCountValid < config.GlobalConfig.SubUrlsMinNodeCount {
+					slog.Warn("订阅节点数量不足，已标记为失败",
+						"url", url,
+						"过滤前节点数", nodeCountTotal,
+						"过滤后节点数", nodeCountValid,
+						"最低要求", config.GlobalConfig.SubUrlsMinNodeCount)
+					markFailed(url)
+					return
+				}
+				markSuccess(url)
 				return
 			}
 
@@ -220,23 +247,35 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 					converted := convertUnStandandJsonViaConvert(con2)
 					if len(converted) > 0 {
 						for _, proxy := range converted {
+							nodeCountTotal++
 							if t, ok := proxy["type"].(string); ok {
 								if len(config.GlobalConfig.NodeType) > 0 && !lo.Contains(config.GlobalConfig.NodeType, t) {
 									continue
 								}
 							}
+							nodeCountValid++
 							proxy["sub_url"] = url
 							proxy["sub_tag"] = tag
 							proxyChan <- proxy
+						}
+						// 检查节点数量是否满足最低要求
+						if config.GlobalConfig.SubUrlsMinNodeCount > 0 && nodeCountValid < config.GlobalConfig.SubUrlsMinNodeCount {
+							slog.Warn("订阅节点数量不足，已标记为失败",
+								"url", url,
+								"过滤前节点数", nodeCountTotal,
+								"过滤后节点数", nodeCountValid,
+								"最低要求", config.GlobalConfig.SubUrlsMinNodeCount)
+							markFailed(url)
+							return
 						}
 						markSuccess(url)
 						return
 					}
 				}
 			}
-			markSuccess(url)
 			for _, proxy := range proxyList {
 				if proxyMap, ok := proxy.(map[string]any); ok {
+					nodeCountTotal++
 					if t, ok := proxyMap["type"].(string); ok {
 						// 只测试指定协议
 						if len(config.GlobalConfig.NodeType) > 0 && !lo.Contains(config.GlobalConfig.NodeType, t) {
@@ -252,12 +291,24 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 							}
 						}
 					}
+					nodeCountValid++
 					// 为每个节点添加订阅链接来源信息和备注
 					proxyMap["sub_url"] = url
 					proxyMap["sub_tag"] = tag
 					proxyChan <- proxyMap
 				}
 			}
+			// 检查节点数量是否满足最低要求
+			if config.GlobalConfig.SubUrlsMinNodeCount > 0 && nodeCountValid < config.GlobalConfig.SubUrlsMinNodeCount {
+				slog.Warn("订阅节点数量不足，已标记为失败",
+					"url", url,
+					"过滤前节点数", nodeCountTotal,
+					"过滤后节点数", nodeCountValid,
+					"最低要求", config.GlobalConfig.SubUrlsMinNodeCount)
+				markFailed(url)
+				return
+			}
+			markSuccess(url)
 		}(subUrl)
 	}
 
