@@ -735,49 +735,6 @@ func showProgress(done chan bool, total int) {
 	}
 }
 
-func checkSubscriptionSuccessRate(allProxies []map[string]any, results []Result) {
-	subStats := make(map[string]struct {
-		total   int
-		success int
-	})
-
-	for _, proxy := range allProxies {
-		if subUrl, ok := proxy["sub_url"].(string); ok {
-			stats := subStats[subUrl]
-			stats.total++
-			subStats[subUrl] = stats
-		}
-	}
-
-	for _, result := range results {
-		if result.Proxy != nil {
-			if subUrl, ok := result.Proxy["sub_url"].(string); ok {
-				stats := subStats[subUrl]
-				stats.success++
-				subStats[subUrl] = stats
-			}
-			delete(result.Proxy, "sub_url")
-		}
-	}
-
-	for subUrl, stats := range subStats {
-		if stats.total > 0 {
-			successRate := float32(stats.success) / float32(stats.total)
-			if successRate < config.GlobalConfig.SuccessRate {
-				slog.Warn(fmt.Sprintf("订阅成功率过低: %s", subUrl),
-					"总节点数", stats.total,
-					"成功节点数", stats.success,
-					"成功占比", fmt.Sprintf("%.2f%%", successRate*100))
-			} else {
-				slog.Debug(fmt.Sprintf("订阅节点统计: %s", subUrl),
-					"总节点数", stats.total,
-					"成功节点数", stats.success,
-					"成功占比", fmt.Sprintf("%.2f%%", successRate*100))
-			}
-		}
-	}
-}
-
 // statsConn wraps net.Conn to count bytes read and apply rate limiting
 type statsConn struct {
 	net.Conn
