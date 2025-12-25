@@ -342,14 +342,20 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 
 // from 3k
 // resolveSubUrls 合并本地与远程订阅清单并去重
-func resolveSubUrls() ([]string, int, int) {
+func resolveSubUrls() ([]string, map[string]bool, int, int) {
 	// 计数
 	var localNum, remoteNum int
 	localNum = len(config.GlobalConfig.SubUrls)
 
+	// 创建本地订阅标识映射
+	localUrls := make(map[string]bool)
+	
 	urls := make([]string, 0, len(config.GlobalConfig.SubUrls))
 	// 本地配置
-	urls = append(urls, config.GlobalConfig.SubUrls...)
+	for _, url := range config.GlobalConfig.SubUrls {
+		urls = append(urls, url)
+		localUrls[url] = true
+	}
 
 	// 远程清单
 	if len(config.GlobalConfig.SubUrlsRemote) != 0 {
@@ -359,6 +365,7 @@ func resolveSubUrls() ([]string, int, int) {
 			} else {
 				remoteNum += len(remote)
 				urls = append(urls, remote...)
+				// 远程订阅不添加到 localUrls
 			}
 		}
 
@@ -378,7 +385,7 @@ func resolveSubUrls() ([]string, int, int) {
 		seen[s] = struct{}{}
 		out = append(out, s)
 	}
-	return out, localNum, remoteNum
+	return out, localUrls, localNum, remoteNum
 }
 
 // fetchRemoteSubUrls 从远程地址读取订阅URL清单
