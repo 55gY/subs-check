@@ -227,9 +227,6 @@ func (app *App) checkProxies() error {
 	save.SaveConfig(results)
 	utils.SendNotify(len(results))
 
-	// 执行回调脚本
-	utils.ExecuteCallback(len(results))
-
 	return nil
 }
 
