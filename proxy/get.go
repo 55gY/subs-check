@@ -39,10 +39,10 @@ func ParseSingleNode(nodeLink string) ([]map[string]any, error) {
 	return proxies, nil
 }
 
-func GetProxies() ([]map[string]any, []string, []string, error) {
+func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error) {
 
 	// 解析本地与远程订阅清单
-	subUrls, localNum, remoteNum := resolveSubUrls()
+	subUrls, localUrls, localNum, remoteNum := resolveSubUrls()
 	slog.Info("订阅链接数量", "本地", localNum, "远程", remoteNum, "总计", len(subUrls))
 
 	// 初始化订阅获取进度
@@ -337,7 +337,7 @@ func GetProxies() ([]map[string]any, []string, []string, error) {
 		successSubs = append(successSubs, successUrl)
 	}
 
-	return mihomoProxies, failedSubs, successSubs, nil
+	return mihomoProxies, failedSubs, successSubs, localUrls, nil
 }
 
 // from 3k

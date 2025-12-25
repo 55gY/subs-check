@@ -103,7 +103,9 @@ sub-urls-timeout: 10
 # > 0: 启用智能重试机制，失败N次后才删除订阅链接（推荐：3-5）
 # = 0: 失败1次就立即删除订阅链接
 # < 0: 永不删除失败的订阅链接（默认：-1）
-# 注意：删除操作会保留配置文件中的注释和格式
+# 注意：
+#   1. 删除操作会保留配置文件中的注释和格式
+#   2. 此功能仅对本地订阅（sub-urls）生效，远程订阅（sub-urls-remote）失败时会记录但不会删除
 sub-urls-retry-failed: 3
 # 最低节点数量阈值（节点类型过滤后统计）
 # 当订阅解析后的有效节点数量低于此值时，将该订阅记录为失败
@@ -376,3 +378,5 @@ sub-urls:
     - https://youxi.myyfqh.tech/gougoucloud/18ee46bc7cfd23e0386b56f2208f5823
     - https://cyberguard.cfd/api/v1/client/subscribe?token=07be47a8cd3a22a417905ab2e41ccf28
     - http://www.pjw5.top/peng495539229
+    - https://s.winniezz.top/qaHbf6
+    - https://shz.al/eTEW

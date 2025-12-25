@@ -1,5 +1,158 @@
 # API 调整说明
 
+## 🐛 修复远程订阅失败删除问题 - 2025年12月25日
+
+### 问题描述
+
+在之前的版本中，存在一个严重的设计缺陷：
+
+- 本地订阅（`sub-urls`）和远程订阅（`sub-urls-remote`）获取的订阅链接会合并在一起
+- 当订阅获取失败达到阈值时，程序会尝试删除失败的订阅链接
+- 但删除操作 `RemoveSubUrlFromConfig()` 只能从本地配置文件的 `sub-urls` 段删除
+- 导致远程订阅链接删除失败，产生错误日志："删除订阅失败"
+- 失败记录不断累积，每次检测都会重复尝试删除，造成资源浪费
+
+### 解决方案
+
+实现了订阅源追踪机制，区分本地订阅和远程订阅，采取不同的失败处理策略。
+
+### 主要变更
+
+#### 1. **proxy/get.go - resolveSubUrls() 函数**
+
+**旧签名：**
+```go
+func resolveSubUrls() ([]string, int, int)
+// 返回：订阅URL列表, 本地订阅数量, 远程订阅数量
+```
+
+**新签名：**
+```go
+func resolveSubUrls() ([]string, map[string]bool, int, int)
+// 返回：订阅URL列表, 本地订阅标识映射, 本地订阅数量, 远程订阅数量
+```
+
+**变更内容：**
+- 新增 `localUrls := make(map[string]bool)` 映射表
+- 遍历本地配置 `config.GlobalConfig.SubUrls` 时，将每个 URL 标记为 `localUrls[url] = true`
+- 远程订阅获取的 URL 追加到 `urls` 列表，但**不**添加到 `localUrls` 映射
+- 通过 `localUrls` 映射可准确判断订阅来源
+
+#### 2. **proxy/get.go - GetProxies() 函数**
+
+**旧签名：**
+```go
+func GetProxies() ([]map[string]any, []string, []string, error)
+// 返回：代理列表, 失败订阅, 成功订阅, 错误
+```
+
+**新签名：**
+```go
+func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
+// 返回：代理列表, 失败订阅, 成功订阅, 本地订阅标识映射, 错误
+```
+
+**变更内容：**
+- 调用 `resolveSubUrls()` 时接收新的 `localUrls` 返回值
+- 在返回值中传递 `localUrls` 给调用方
+
+#### 3. **check/check.go - 失败处理逻辑**
+
+**旧逻辑：**
+```go
+for _, failedUrl := range failedSubs {
+    failureCount, _ := config.IncrementFailureCount(failedUrl)
+    if config.ShouldRemoveFailedSub(failedUrl, failureCount) {
+        slog.Warn("已删除失败订阅")
+        config.RemoveSubUrlFromConfig(failedUrl)  // 无论来源都尝试删除
+    }
+}
+```
+
+**新逻辑：**
+```go
+for _, failedUrl := range failedSubs {
+    if !localUrls[failedUrl] {
+        // 远程订阅 - 仅记录，不删除
+        failureCount, _ := config.IncrementFailureCount(failedUrl)
+        if config.ShouldRemoveFailedSub(failedUrl, failureCount) {
+            slog.Warn("远程订阅失败次数已达阈值", 
+                "说明", "该订阅来自远程清单，不会从本地配置中删除，请检查远程清单质量")
+        }
+        continue
+    }
+    
+    // 本地订阅 - 记录并删除
+    failureCount, _ := config.IncrementFailureCount(failedUrl)
+    if config.ShouldRemoveFailedSub(failedUrl, failureCount) {
+        slog.Warn("已删除失败订阅")
+        config.RemoveSubUrlFromConfig(failedUrl)
+    }
+}
+```
+
+**核心改进：**
+- 通过 `localUrls[failedUrl]` 判断订阅来源
+- 远程订阅失败：记录失败次数 + 警告日志，**不执行删除操作**
+- 本地订阅失败：记录失败次数 + 执行删除操作（原有行为）
+
+#### 4. **config/config.example.yaml - 文档更新**
+
+更新 `sub-urls-retry-failed` 配置项注释：
+
+```yaml
+# 订阅链接失败重试次数
+# 控制订阅链接获取失败后的处理策略：
+# > 0: 启用智能重试机制，失败N次后才删除订阅链接（推荐：3-5）
+# = 0: 失败1次就立即删除订阅链接
+# < 0: 永不删除失败的订阅链接（默认：-1）
+# 注意：
+#   1. 删除操作会保留配置文件中的注释和格式
+#   2. 此功能仅对本地订阅（sub-urls）生效，远程订阅（sub-urls-remote）失败时会记录但不会删除
+sub-urls-retry-failed: 3
+```
+
+### 影响范围
+
+1. **本地订阅（sub-urls）**：行为完全不变
+   - 失败达到阈值仍会自动删除
+   - 保留配置文件注释和格式
+
+2. **远程订阅（sub-urls-remote）**：新增保护机制
+   - 失败时记录到 `sub_failure_record.txt`
+   - 达到阈值时输出警告日志，提示检查远程清单质量
+   - **不会**尝试从本地配置文件删除
+   - 避免产生 "删除订阅失败" 错误日志
+
+3. **API 兼容性**：Breaking Change
+   - `GetProxies()` 函数签名变更，新增返回值
+   - 外部调用需要更新以接收新的 `localUrls` 返回值
+
+### 优势
+
+1. **消除错误日志**：不再产生 "删除订阅失败" 的无效错误
+2. **提高性能**：避免重复尝试删除不存在的订阅链接
+3. **清晰的职责分离**：
+   - 本地订阅由用户在配置文件中维护，程序可自动清理
+   - 远程订阅由远程清单维护者管理，程序仅消费和报告状态
+4. **更好的用户体验**：警告日志明确提示用户检查远程清单质量
+
+### 升级指南
+
+1. **如果您使用了 sub-urls-remote**：
+   - 无需修改配置文件
+   - 注意查看日志中的远程订阅失败警告
+   - 根据警告评估是否需要更换远程订阅清单源
+
+2. **如果您仅使用 sub-urls**：
+   - 完全无影响，行为与之前一致
+
+3. **如果您二次开发调用了 GetProxies()**：
+   - 需要更新函数调用以接收新增的 `map[string]bool` 返回值
+   - 参考 `check/check.go` 中的使用方式
+
+---
+
 ## 🧹 移除 save-method 配置项 - 2025年12月25日
 
 ### 变更说明

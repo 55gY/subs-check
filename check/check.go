@@ -95,7 +95,7 @@ func Check() ([]Result, error) {
 		}
 	}()
 
-	tmp, failedSubs, successSubs, err := proxyutils.GetProxies()
+	tmp, failedSubs, successSubs, localUrls, err := proxyutils.GetProxies()
 	close(subsFetchDone) // 停止进度同步
 
 	// 订阅获取完成,重置订阅进度变量(标记订阅阶段结束)
@@ -114,6 +114,19 @@ func Check() ([]Result, error) {
 		}
 	}
 	for _, failedUrl := range failedSubs {
+		// 检查是否为本地订阅
+		if !localUrls[failedUrl] {
+			// 远程订阅失败时记录但不删除
+			failureCount, countErr := config.IncrementFailureCount(failedUrl)
+			if countErr != nil {
+				slog.Error("记录失败次数失败", "error", countErr, "url", failedUrl)
+			} else if config.ShouldRemoveFailedSub(failedUrl, failureCount) {
+				slog.Warn("远程订阅失败次数已达阈值", "url", failedUrl, "失败次数", failureCount, "说明", "该订阅来自远程清单，不会从本地配置中删除，请检查远程清单质量")
+			}
+			continue
+		}
+		
+		// 只处理本地订阅的删除
 		failureCount, countErr := config.IncrementFailureCount(failedUrl)
 		if countErr != nil {
 			slog.Error("记录失败次数失败", "error", countErr, "url", failedUrl)

@@ -29,13 +29,16 @@ Subs-Check 是一个轻量级、高性能的订阅节点检测工具，专为代
 - **批量节点检测** - 支持并发检测大量节点，可自定义并发数
 - **速度测试** - 内置测速功能，自动过滤慢速节点
 - **媒体解锁检测** - 支持 Netflix、Disney+、YouTube、OpenAI、Gemini、TikTok 等平台
-- **IP 风险评估** - 检测节点 IP 的风险等级
-- **智能重命名** - 根据 IP 归属地自动重命名节点
+- **IP 风险评估与纯净度评分** - 使用 IPPure API 检测节点 IP 的风险等级和纯净度评分（0-100）
+- **智能重命名** - 根据 IP 归属地和纯净度评分自动重命名节点（如：US_优秀、HK_中等、JP_极佳）
 - **去重优化** - 自动去除重复节点
 
 ### 🔄 自动化管理
 - **定时检测** - 支持 cron 表达式和固定间隔两种定时模式
-- **智能失败处理** - 记录订阅获取失败次数，达到配置的重试次数后才自动删除（`remove-failed-sub` + `remove-failed-sub-retry`）
+- **远程订阅源** - 支持从远程清单集中维护订阅链接（`sub-urls-remote`）
+- **节点数量检测** - 检测订阅是否被清空或节点过少（`sub-urls-min-node-count`）
+- **智能失败处理** - 本地订阅失败达阈值后自动删除，远程订阅失败仅记录不删除
+- **订阅源追踪** - 区分本地和远程订阅，确保删除操作安全可控
 - **热重载配置** - 配置文件修改后自动生效，无需重启
 - **订阅结果保存** - 保存到本地文件
 
@@ -138,9 +141,6 @@ check-interval: 120
 # 或使用 cron 表达式（优先级高于 check-interval）
 # cron-expression: "0 */2 * * *"  # 每2小时执行
 
-# 成功节点数量限制（0 表示不限制）
-success-limit: 0
-
 # 超时时间（毫秒）
 timeout: 1000
 
@@ -193,6 +193,40 @@ rename-node: true
 # 节点名称前缀
 node-prefix: ""
 ```
+
+**节点命名规则：**
+
+启用 `rename-node` 后，程序会根据节点 IP 的归属地和纯净度评分自动重命名节点：
+
+**命名格式：** `[前缀]国家代码_纯净度等级[_备注]`
+
+**纯净度等级评分标准：**（基于 IPPure fraudScore，0-100分）
+- **0-10**：极佳 - IP 质量极高，几乎无风险
+- **11-30**：优秀 - IP 质量很好，风险极低
+- **31-50**：良好 - IP 质量较好，风险较低
+- **51-70**：中等 - IP 质量一般，存在一定风险
+- **71-90**：差 - IP 质量较差，风险较高
+- **>90**：极差 - IP 质量很差，风险很高
+
+**命名示例：**
+```
+US_优秀          # 美国节点，fraudScore 11-30
+HK_中等          # 香港节点，fraudScore 51-70
+JP_极佳          # 日本节点，fraudScore 0-10
+SG_良好_备注     # 新加坡节点，fraudScore 31-50，带自定义备注
+```
+
+**IP 位置查询 API 优先级：**
+1. **IPPure**（主 API）- 提供位置信息和 fraudScore
+2. ip.122911.xyz - 备用
+3. IPLark - 备用
+4. Cloudflare - 备用
+5. EdgeOne - 备用
+
+**注意事项：**
+- IP 查询可能因节点质量差导致失败，会稍微影响整体检测速度
+- 如果主 API 失败，会自动降级到备用 API（但备用 API 不提供 fraudScore，默认为0）
+- `iprisk` 检测平台会直接使用重命名时获取的 fraudScore，无需额外 API 调用
 
 ### 媒体解锁检测
 
@@ -523,15 +557,23 @@ curl -X POST http://localhost:8199/api/config/add \
 **在 Web 管理界面中使用：**
 访问 `http://localhost:8199/admin`，在"添加订阅"表单中输入链接即可。
 
-### 智能订阅失败处理（remove-failed-sub）
+### 智能订阅失败处理（sub-urls-retry-failed）
 
-自动监控和智能处理无法访问的订阅链接，避免因临时网络问题误删除：
+自动监控和智能处理无法访问的订阅链接，区分本地订阅和远程订阅，避免因临时网络问题误删除：
 
 **配置方法：**
 ```yaml
 # 在 config.yaml 中启用
-remove-failed-sub: true
-remove-failed-sub-retry: 3  # 失败3次后才删除
+sub-urls-retry-failed: 3  # 本地订阅失败3次后才删除
+sub-urls-min-node-count: 5  # 订阅至少要有5个节点
+
+# 远程订阅清单（失败时仅记录不删除）
+sub-urls-remote:
+  - "https://example.com/sub-list.txt"
+
+# 本地订阅（失败时可自动删除）
+sub-urls:
+  - "https://example.com/sub1"
 ```
 
 **工作机制：**
@@ -542,7 +584,8 @@ remove-failed-sub-retry: 3  # 失败3次后才删除
    - 获取成功时会自动重置计数
 
 2. **智能删除策略**：
-   - 只有连续失败次数达到 `remove-failed-sub-retry` 配置值才删除
+   - **本地订阅**：只有连续失败次数达到 `sub-urls-retry-failed` 配置值才删除
+   - **远程订阅**：达到阈值时输出警告日志，但不删除（由远程清单维护者管理）
    - 避免因网络波动、DNS 解析问题等临时故障导致的误删
    - 保留配置文件格式和注释
 
@@ -563,15 +606,24 @@ remove-failed-sub-retry: 3  # 失败3次后才删除
 **最佳实践：**
 ```yaml
 # 推荐配置
-remove-failed-sub: true
-remove-failed-sub-retry: 5  # 较高的重试次数，避免误删
+sub-urls-retry-failed: 5  # 较高的重试次数，避免误删
+sub-urls-min-node-count: 3  # 确保订阅有足够节点
+
+# 使用远程订阅清单集中维护
+sub-urls-remote:
+  - "https://your-repo.com/sub-list.txt"
 ```
 
 **日志示例：**
 ```
+# 本地订阅失败并删除
 WARN 获取订阅链接错误跳过: https://expired.com/sub
 INFO 记录订阅链接失败 url=https://expired.com/sub 失败次数=3 删除阈值=3
-INFO 已从配置文件中删除失败的订阅: https://expired.com/sub
+WARN 已删除失败订阅
+
+# 远程订阅失败但不删除
+WARN 获取订阅链接错误跳过: https://remote-list.com/sub
+WARN 远程订阅失败次数已达阈值 说明=该订阅来自远程清单，不会从本地配置中删除，请检查远程清单质量
 ```
 
 **适用场景：**
@@ -580,31 +632,11 @@ INFO 已从配置文件中删除失败的订阅: https://expired.com/sub
 - 📊 **订阅源质量监控** - 结合日志监控订阅的可用性
 
 **注意事项：**
-- 删除操作是永久性的，会修改配置文件
+- 本地订阅删除操作是永久性的，会修改配置文件
+- 远程订阅失败不会被删除，仅记录和警告
 - 建议在启用前备份配置文件
-- 如果订阅暂时无法访问（网络问题），也会被删除
+- 使用较高的 `sub-urls-retry-failed` 值避免误删（推荐5次以上）
 - 可以通过 API 或 Web 界面重新添加被删除的订阅
-
-### 回调通知
-
-支持在检测完成后发送通知：
-
-```yaml
-# Webhook 回调
-callback-url: "https://your-webhook.com/notify"
-
-# 企业微信通知
-wechat-webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
-```
-
-### 订阅成功率警告
-
-当订阅成功率低于阈值时发出警告：
-
-```yaml
-# 成功率阈值（0.0-1.0）
-success-rate: 0.3  # 低于 30% 时警告
-```
 
 ## 常见问题
 
@@ -671,8 +703,8 @@ done
 
 **配置推荐：**
 ```yaml
-remove-failed-sub: true
-remove-failed-sub-retry: 5  # 失败5次后才删除，减少误删
+sub-urls-retry-failed: 5  # 本地订阅失败5次后才删除，减少误删
+sub-urls-min-node-count: 3  # 确保订阅至少有3个节点
 ```
 
 **监控失败状态：**
