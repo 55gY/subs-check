@@ -20,7 +20,6 @@ type Config struct {
 	TotalSpeedLimit      int      `yaml:"total-speed-limit"`
 	MinSpeed             int      `yaml:"min-speed"`
 	Timeout              int      `yaml:"timeout"`
-	FilterRegex          string   `yaml:"filter-regex"`
 	SaveMethod           string   `yaml:"save-method"`
 	SubUrlsReTry         int      `yaml:"sub-urls-retry"`
 	SubUrlsRetryInterval int      `yaml:"sub-urls-retry-interval"`
@@ -29,8 +28,6 @@ type Config struct {
 	SubUrlsRemote        []string `yaml:"sub-urls-remote"`
 	SubUrls              []string `yaml:"sub-urls"`
 	SuccessRate          float32  `yaml:"success-rate"`
-	MihomoApiUrl         string   `yaml:"mihomo-api-url"`
-	MihomoApiSecret      string   `yaml:"mihomo-api-secret"`
 	ListenPort           string   `yaml:"listen-port"`
 	RenameNode           bool     `yaml:"rename-node"`
 	KeepSuccessProxies   bool     `yaml:"keep-success-proxies"`
@@ -40,7 +37,6 @@ type Config struct {
 	NotifyTitle          string   `yaml:"notify-title"`
 	MediaCheck           bool     `yaml:"media-check"`
 	Platforms            []string `yaml:"platforms"`
-	SuccessLimit         int32    `yaml:"success-limit"`
 	NodePrefix           string   `yaml:"node-prefix"`
 	NodeType             []string `yaml:"node-type"`
 	EnableWebUI          bool     `yaml:"enable-web-ui"`
