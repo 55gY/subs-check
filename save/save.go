@@ -5,7 +5,6 @@ import (
 	"log/slog"
 
 	"github.com/55gY/subs-check/check"
-	"github.com/55gY/subs-check/config"
 	"github.com/55gY/subs-check/save/method"
 	"gopkg.in/yaml.v3"
 )
