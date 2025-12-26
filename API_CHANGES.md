@@ -1,5 +1,231 @@
 # API 调整说明
 
+## 🎯 新增检测后添加功能 (test) - 2025年12月26日
+
+### 功能概述
+
+为 `/api/addConfig` 接口新增可选参数 `test`，支持在添加订阅链接或单个节点前进行存活和速度检测，只有通过检测的节点才会被添加到配置文件中。
+
+### 主要特性
+
+- **智能检测**: 对节点进行存活检测和速度测试
+- **自动过滤**: 只添加测速通过的节点到 `all.yaml`
+- **超时控制**: 检测总超时时间为 120 秒，超时后返回已完成的部分结果
+- **并发检测**: 使用配置的并发数进行并发检测，提高效率
+- **详细反馈**: 返回检测统计信息（测试节点数、通过数、失败数、添加数、耗时等）
+- **向下兼容**: 默认为 `false`，不影响现有使用方式
+
+### API 变更
+
+#### 请求参数
+
+**原有参数：**
+```json
+{
+  "sub_url": "订阅链接（可选）",
+  "ss": "单个节点链接（可选）"
+}
+```
+
+**新增参数：**
+```json
+{
+  "sub_url": "订阅链接（可选）",
+  "ss": "单个节点链接（可选）",
+  "test": false  // 新增：是否在添加前进行检测（默认 false）
+}
+```
+
+#### 工作流程
+
+**当 `test: false` 时（默认）：**
+- 单节点：直接解析并添加到 `all.yaml`
+- 订阅链接：直接添加到配置文件的 `sub-urls`
+- 保持原有行为和响应格式
+
+**当 `test: true` 时：**
+1. **单节点流程**：
+   - 解析节点链接
+   - 创建代理客户端
+   - 执行存活检测（`CheckAlive`）
+   - 执行速度测试（`CheckSpeed`）
+   - 通过检测才添加到 `all.yaml`
+   - 返回详细检测结果
+
+2. **订阅链接流程**：
+   - 获取订阅内容
+   - 解析所有节点
+   - 并发检测每个节点（存活+测速）
+   - 测速通过的节点添加到 `all.yaml`
+   - 至少1个节点通过才添加订阅链接到 `sub-urls`
+   - 返回详细检测统计
+
+#### 响应格式
+
+**单节点 - test: false（原有格式）：**
+```json
+{
+  "message": "节点已添加"
+}
+```
+
+**单节点 - test: true（新格式）：**
+```json
+{
+  "message": "节点检测并添加成功",
+  "tested_nodes": 1,
+  "passed_nodes": 1,
+  "failed_nodes": 0,
+  "added_nodes": 1,
+  "duration": "1.234s",
+  "timeout": false
+}
+```
+
+**订阅链接 - test: false（原有格式）：**
+```json
+{
+  "message": "订阅链接已添加",
+  "sub_url": "https://example.com/sub"
+}
+```
+
+**订阅链接 - test: true（新格式）：**
+```json
+{
+  "message": "订阅检测并添加成功",
+  "sub_url": "https://example.com/sub",
+  "tested_nodes": 100,
+  "passed_nodes": 85,
+  "failed_nodes": 15,
+  "added_nodes": 80,
+  "duration": "45.678s",
+  "timeout": false,
+  "warning": "部分节点因超时未完成检测"  // 仅在超时时出现
+}
+```
+
+**错误响应（检测失败）：**
+```json
+{
+  "error": "节点检测失败（检测超时）",
+  "tested_nodes": 1,
+  "passed_nodes": 0,
+  "failed_nodes": 1,
+  "duration": "120.000s",
+  "timeout": true
+}
+```
+
+#### 使用示例
+
+**示例 1：直接添加单节点（原有方式）**
+```bash
+curl -X POST http://localhost:8199/api/addConfig \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ss": "vmess://eyJ2IjoiMiIsInBzIjoi..."
+  }'
+```
+
+**示例 2：检测后添加单节点**
+```bash
+curl -X POST http://localhost:8199/api/addConfig \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ss": "vmess://eyJ2IjoiMiIsInBzIjoi...",
+    "test": true
+  }'
+```
+
+**示例 3：直接添加订阅链接（原有方式）**
+```bash
+curl -X POST http://localhost:8199/api/addConfig \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sub_url": "https://example.com/sub"
+  }'
+```
+
+**示例 4：检测后添加订阅链接**
+```bash
+curl -X POST http://localhost:8199/api/addConfig \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sub_url": "https://example.com/sub",
+    "test": true
+  }'
+```
+
+### 技术细节
+
+#### 检测流程
+
+1. **初始化限速桶**: 如果 `checker.Bucket` 未初始化，使用配置的 `total-speed-limit` 初始化
+2. **创建超时上下文**: 设置 120 秒总超时
+3. **并发控制**: 使用信号量限制并发数为配置的 `concurrent` 值
+4. **存活检测**: 访问 `alive-test-url`（默认 `http://gstatic.com/generate_204`），检查 HTTP 状态码是否为 2xx
+5. **速度测试**: 下载 `speed-test-url` 的内容，计算速度并与 `min-speed` 比较
+6. **节点添加**: 测速通过的节点使用互斥锁保护，逐个添加到 `all.yaml`
+7. **去重处理**: 使用 `isProxyDuplicate` 检查节点是否已存在，已存在的不重复添加
+
+#### 超时机制
+
+- **总超时**: 120 秒
+- **单节点超时**: 使用配置的 `timeout` 值（默认 5000ms）
+- **下载超时**: 使用配置的 `download-timeout` 值（默认 10 秒）
+- **超时处理**: 
+  - 超时后立即停止新任务启动
+  - 等待已启动的检测任务完成
+  - 返回已完成的部分结果
+  - 响应中包含 `timeout: true` 和警告信息
+
+#### 并发安全
+
+- **文件写入**: 使用 `sync.Mutex` 保护对 `all.yaml` 的写入操作
+- **计数统计**: 使用 `sync/atomic` 的原子操作进行计数
+- **协程同步**: 使用 `sync.WaitGroup` 等待所有检测任务完成
+
+#### 节点去重
+
+- 检测通过的节点在添加时会自动检查是否已存在
+- 使用 `isProxyDuplicate` 函数根据协议类型检查关键字段
+- `passed_nodes` 表示通过检测的节点数
+- `added_nodes` 表示实际添加的节点数（排除已存在的）
+
+### 配置要求
+
+使用此功能需要确保以下配置项已正确设置：
+
+```yaml
+concurrent: 10              # 并发检测数
+timeout: 5000              # 单节点超时（毫秒）
+alive-test-url: "http://gstatic.com/generate_204"  # 存活测试URL
+speed-test-url: "https://speed.cloudflare.com/__down?bytes=20000000"  # 测速URL
+download-timeout: 10       # 下载超时（秒）
+min-speed: 0               # 最低速度要求（KB/s），0 表示不限制
+total-speed-limit: 0       # 总速度限制（KB/s），0 表示不限制
+```
+
+### 注意事项
+
+1. **检测耗时**: 大量节点可能需要较长检测时间，建议前端显示进度或加载提示
+2. **资源占用**: 并发检测会占用系统资源，建议根据服务器性能调整 `concurrent` 值
+3. **超时设置**: 120 秒超时是硬性限制，超时后未完成的节点会被标记为失败
+4. **订阅添加**: 订阅链接只有在至少1个节点通过检测时才会被添加到 `sub-urls`
+5. **兼容性**: 不设置 `test` 或设置为 `false` 时，完全保持原有行为
+
+### 相关代码变更
+
+- **core/handlers.go**: 
+  - 修改 `addConfig` 函数添加 `Test` 参数支持
+  - 新增 `testAndAddNodes` 函数实现并发检测和添加
+  - 新增 `addSingleNodeFromProxy` 函数用于从 proxy map 添加节点
+  - 新增 `parseSubscriptionNodes` 函数解析订阅内容
+  - 新增 `TestResult` 结构体存储检测结果
+
+---
+
 ## 🐛 修复远程订阅失败删除问题 - 2025年12月25日
 
 ### 问题描述

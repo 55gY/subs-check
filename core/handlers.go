@@ -2,14 +2,23 @@ package core
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/55gY/subs-check/checker"
+	"github.com/55gY/subs-check/config"
 	"github.com/55gY/subs-check/output"
 	proxyutils "github.com/55gY/subs-check/provider"
+	"github.com/55gY/subs-check/util"
 	"github.com/gin-gonic/gin"
+	"github.com/juju/ratelimit"
+	"github.com/metacubex/mihomo/common/convert"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,7 +66,8 @@ func (app *App) updateConfig(c *gin.Context) {
 func (app *App) addConfig(c *gin.Context) {
 	var req struct {
 		SubUrl string `json:"sub_url"`
-		SS     string `json:"ss"` // 单个节点链接（支持vmess/ss/trojan等）
+		SS     string `json:"ss"`   // 单个节点链接（支持vmess/ss/trojan等）
+		Test   bool   `json:"test"` // 是否在添加前进行检测（默认false）
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -67,6 +77,52 @@ func (app *App) addConfig(c *gin.Context) {
 
 	// 如果是单个节点添加
 	if req.SS != "" {
+		if req.Test {
+			// 检测后添加模式
+			proxies, err := proxyutils.ParseSingleNode(req.SS)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("解析节点失败: %v", err)})
+				return
+			}
+			if len(proxies) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "未能解析出有效节点"})
+				return
+			}
+
+			result := app.testAndAddNodes(proxies)
+			if result.PassedNodes == 0 {
+				errorMsg := "节点检测失败"
+				if result.Timeout {
+					errorMsg += "（检测超时）"
+				}
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":        errorMsg,
+					"tested_nodes": result.TestedNodes,
+					"passed_nodes": result.PassedNodes,
+					"failed_nodes": result.FailedNodes,
+					"duration":     result.Duration,
+					"timeout":      result.Timeout,
+				})
+				return
+			}
+
+			response := gin.H{
+				"message":      "节点检测并添加成功",
+				"tested_nodes": result.TestedNodes,
+				"passed_nodes": result.PassedNodes,
+				"failed_nodes": result.FailedNodes,
+				"added_nodes":  result.AddedNodes,
+				"duration":     result.Duration,
+			}
+			if result.Timeout {
+				response["timeout"] = true
+				response["warning"] = "部分节点因超时未完成检测"
+			}
+			c.JSON(http.StatusOK, response)
+			return
+		}
+
+		// 直接添加模式（原有逻辑）
 		if err := app.addSingleNode(req.SS); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("添加节点失败: %v", err)})
 			return
@@ -79,6 +135,9 @@ func (app *App) addConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "sub_url或ss不能为空"})
 		return
 	}
+
+	// 声明测试结果变量（如果启用了检测）
+	var testResult TestResult
 
 	// 读取现有配置
 	configData, err := os.ReadFile(app.configPath)
@@ -106,6 +165,53 @@ func (app *App) addConfig(c *gin.Context) {
 				}
 			}
 		}
+	}
+
+	// 如果启用了检测后添加
+	if req.Test {
+		// 获取订阅内容
+		actualUrl := util.WarpUrl(req.SubUrl)
+		data, err := proxyutils.GetDateFromSubs(actualUrl)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取订阅失败: %v", err)})
+			return
+		}
+
+		// 解析订阅为节点列表
+		proxies, err := parseSubscriptionNodes(data)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("解析订阅失败: %v", err)})
+			return
+		}
+
+		if len(proxies) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "订阅中没有有效节点"})
+			return
+		}
+
+		// 检测并添加节点到 all.yaml
+		result := app.testAndAddNodes(proxies)
+
+		// 至少需要有一个节点通过检测
+		if result.PassedNodes == 0 {
+			errorMsg := "订阅中没有节点通过检测"
+			if result.Timeout {
+				errorMsg += "（检测超时）"
+			}
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":        errorMsg,
+				"tested_nodes": result.TestedNodes,
+				"passed_nodes": result.PassedNodes,
+				"failed_nodes": result.FailedNodes,
+				"duration":     result.Duration,
+				"timeout":      result.Timeout,
+			})
+			return
+		}
+
+		// 有节点通过检测，保存检测结果，稍后在成功添加订阅后返回
+		testResult = result
+		// 继续执行添加订阅链接的逻辑...
 	}
 
 	// 使用字符串追加的方式，保留原有格式和注释
@@ -190,10 +296,30 @@ func (app *App) addConfig(c *gin.Context) {
 	}
 
 	// 配置文件监听器会自动重新加载配置
-	c.JSON(http.StatusOK, gin.H{
-		"message": "订阅链接已添加",
-		"sub_url": req.SubUrl,
-	})
+	// 根据是否启用了检测返回不同的响应
+	if req.Test {
+		// 返回详细的检测结果
+		response := gin.H{
+			"message":      "订阅检测并添加成功",
+			"sub_url":      req.SubUrl,
+			"tested_nodes": testResult.TestedNodes,
+			"passed_nodes": testResult.PassedNodes,
+			"failed_nodes": testResult.FailedNodes,
+			"added_nodes":  testResult.AddedNodes,
+			"duration":     testResult.Duration,
+		}
+		if testResult.Timeout {
+			response["timeout"] = true
+			response["warning"] = "部分节点因超时未完成检测"
+		}
+		c.JSON(http.StatusOK, response)
+	} else {
+		// 原有的简单响应
+		c.JSON(http.StatusOK, gin.H{
+			"message": "订阅链接已添加",
+			"sub_url": req.SubUrl,
+		})
+	}
 }
 
 // getStatus 获取应用状态
@@ -481,4 +607,279 @@ func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any)
 	}
 
 	return false
+}
+
+// TestResult 节点检测结果
+type TestResult struct {
+	TestedNodes int    // 总检测节点数
+	PassedNodes int    // 通过检测的节点数
+	FailedNodes int    // 失败的节点数
+	AddedNodes  int    // 实际添加的节点数（排除重复）
+	Duration    string // 检测耗时
+	Timeout     bool   // 是否超时
+}
+
+// testAndAddNodes 统一的节点检测和添加函数
+// 并发检测所有节点，测速通过的添加到 all.yaml
+// 设置 120 秒总超时，超时后返回已完成的部分结果
+func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
+	startTime := time.Now()
+	result := TestResult{
+		TestedNodes: len(proxies),
+	}
+
+	if len(proxies) == 0 {
+		result.Duration = "0s"
+		return result
+	}
+
+	// 初始化 Bucket（如果未初始化）
+	if checker.Bucket == nil {
+		if config.GlobalConfig.TotalSpeedLimit > 0 {
+			checker.Bucket = ratelimit.NewBucketWithRate(
+				float64(config.GlobalConfig.TotalSpeedLimit)*1024,
+				int64(config.GlobalConfig.TotalSpeedLimit)*1024,
+			)
+		} else {
+			// 不限速
+			checker.Bucket = ratelimit.NewBucketWithRate(1e9, 1e9)
+		}
+	}
+
+	// 创建 120 秒超时的 context
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	// 并发控制
+	concurrent := config.GlobalConfig.Concurrent
+	if concurrent <= 0 {
+		concurrent = 5
+	}
+	semaphore := make(chan struct{}, concurrent)
+
+	// 统计变量
+	var passedCount, failedCount, addedCount atomic.Int32
+	var wg sync.WaitGroup
+	var addMutex sync.Mutex // 保护 addSingleNode 调用
+
+	// 并发检测所有节点
+	for _, proxy := range proxies {
+		// 检查是否超时
+		select {
+		case <-ctx.Done():
+			result.Timeout = true
+			goto finish
+		default:
+		}
+
+		wg.Add(1)
+		semaphore <- struct{}{} // 获取信号量
+
+		go func(proxyMap map[string]any) {
+			defer wg.Done()
+			defer func() { <-semaphore }() // 释放信号量
+
+			// 检查是否已超时
+			select {
+			case <-ctx.Done():
+				failedCount.Add(1)
+				return
+			default:
+			}
+
+			// 创建代理客户端
+			client := checker.CreateClient(proxyMap)
+			if client == nil {
+				failedCount.Add(1)
+				return
+			}
+			defer client.Close()
+
+			// 检查是否超时
+			select {
+			case <-ctx.Done():
+				failedCount.Add(1)
+				return
+			default:
+			}
+
+			// 存活检测
+			alive, err := checker.CheckAlive(client.Client)
+			if err != nil || !alive {
+				failedCount.Add(1)
+				return
+			}
+
+			// 检查是否超时
+			select {
+			case <-ctx.Done():
+				failedCount.Add(1)
+				return
+			default:
+			}
+
+			// 速度测试
+			if config.GlobalConfig.SpeedTestUrl != "" {
+				speed, _, err := checker.CheckSpeed(client.Client, checker.Bucket, client.BytesRead)
+				if err != nil || speed < config.GlobalConfig.MinSpeed {
+					failedCount.Add(1)
+					return
+				}
+			}
+
+			// 测速通过，添加到 all.yaml
+			passedCount.Add(1)
+
+			// 使用互斥锁保护文件写入
+			addMutex.Lock()
+			err = app.addSingleNodeFromProxy(proxyMap)
+			addMutex.Unlock()
+
+			if err == nil {
+				addedCount.Add(1)
+			}
+			// 注意：即使添加失败（如重复），也不影响 passedCount
+		}(proxy)
+	}
+
+finish:
+	// 等待所有协程完成或超时
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// 所有任务完成
+	case <-ctx.Done():
+		// 超时，等待已启动的协程完成
+		result.Timeout = true
+		wg.Wait()
+	}
+
+	result.PassedNodes = int(passedCount.Load())
+	result.FailedNodes = int(failedCount.Load())
+	result.AddedNodes = int(addedCount.Load())
+	result.Duration = time.Since(startTime).Round(time.Millisecond).String()
+
+	return result
+}
+
+// addSingleNodeFromProxy 从 proxy map 添加单个节点到 all.yaml（内部使用）
+func (app *App) addSingleNodeFromProxy(proxy map[string]any) error {
+	// 读取现有的all.yaml
+	saver, err := output.NewLocalSaver()
+	if err != nil {
+		return fmt.Errorf("创建保存器失败: %w", err)
+	}
+
+	allYamlPath := saver.OutputPath + "/all.yaml"
+	var existingConfig map[string]any
+
+	if data, err := os.ReadFile(allYamlPath); err == nil {
+		if err := yaml.Unmarshal(data, &existingConfig); err != nil {
+			return fmt.Errorf("解析all.yaml失败: %w", err)
+		}
+	} else {
+		// 文件不存在，创建新配置
+		existingConfig = make(map[string]any)
+	}
+
+	// 获取现有proxies列表
+	var existingProxies []map[string]any
+	if proxiesInterface, ok := existingConfig["proxies"]; ok {
+		if proxiesList, ok := proxiesInterface.([]any); ok {
+			for _, p := range proxiesList {
+				if proxyMap, ok := p.(map[string]any); ok {
+					existingProxies = append(existingProxies, proxyMap)
+				}
+			}
+		}
+	}
+
+	// 检查是否已存在
+	if isProxyDuplicate(proxy, existingProxies) {
+		return fmt.Errorf("节点已存在")
+	}
+
+	// 添加新节点
+	existingProxies = append(existingProxies, proxy)
+	existingConfig["proxies"] = existingProxies
+
+	// 写回文件
+	newData, err := yaml.Marshal(existingConfig)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+
+	if err := os.MkdirAll(saver.OutputPath, 0755); err != nil {
+		return fmt.Errorf("创建输出目录失败: %w", err)
+	}
+
+	if err := os.WriteFile(allYamlPath, newData, 0644); err != nil {
+		return fmt.Errorf("写入all.yaml失败: %w", err)
+	}
+
+	return nil
+}
+
+// parseSubscriptionNodes 解析订阅内容为节点列表
+func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
+	var proxies []map[string]any
+
+	// 尝试 YAML 格式
+	var con map[string]any
+	err := yaml.Unmarshal(data, &con)
+	if err == nil {
+		// YAML 格式成功解析
+		proxyInterface, ok := con["proxies"]
+		if ok && proxyInterface != nil {
+			proxyList, ok := proxyInterface.([]any)
+			if ok {
+				for _, p := range proxyList {
+					if proxyMap, ok := p.(map[string]any); ok {
+						proxies = append(proxies, proxyMap)
+					}
+				}
+				if len(proxies) > 0 {
+					return proxies, nil
+				}
+			}
+		}
+	}
+
+	// 尝试 V2Ray 链接格式
+	proxyList, err := convert.ConvertsV2Ray(data)
+	if err == nil && len(proxyList) > 0 {
+		return proxyList, nil
+	}
+
+	// 尝试正则提取链接
+	lines := strings.Split(string(data), "\n")
+	var links []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "vmess://") ||
+			strings.HasPrefix(line, "vless://") ||
+			strings.HasPrefix(line, "ss://") ||
+			strings.HasPrefix(line, "ssr://") ||
+			strings.HasPrefix(line, "trojan://") ||
+			strings.HasPrefix(line, "hysteria://") ||
+			strings.HasPrefix(line, "hysteria2://") ||
+			strings.HasPrefix(line, "tuic://") {
+			links = append(links, line)
+		}
+	}
+
+	if len(links) > 0 {
+		extractedData := []byte(strings.Join(links, "\n"))
+		proxyList, err = convert.ConvertsV2Ray(extractedData)
+		if err == nil && len(proxyList) > 0 {
+			return proxyList, nil
+		}
+	}
+
+	return nil, fmt.Errorf("无法解析订阅内容")
 }
