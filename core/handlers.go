@@ -52,7 +52,10 @@ func (app *App) updateConfig(c *gin.Context) {
 		return
 	}
 
-	// 写入新配置
+	// 写入新配置 (使用互斥锁保护)
+	app.configMutex.Lock()
+	defer app.configMutex.Unlock()
+
 	if err := os.WriteFile(app.configPath, []byte(req.Content), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("保存配置文件失败: %v", err)})
 		return
@@ -215,7 +218,10 @@ func (app *App) addConfig(c *gin.Context) {
 	}
 
 	// 使用字符串追加的方式，保留原有格式和注释
-	// 重新读取文件以逐行处理
+	// 重新读取文件以逐行处理 (使用互斥锁保护)
+	app.configMutex.Lock()
+	defer app.configMutex.Unlock()
+
 	file, err := os.Open(app.configPath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("打开配置文件失败: %v", err)})
@@ -449,7 +455,10 @@ func (app *App) addSingleNode(nodeLink string) error {
 		return fmt.Errorf("未能解析出有效节点")
 	}
 
-	// 2. 读取现有的all.yaml
+	// 2. 读取现有的all.yaml (使用互斥锁保护)
+	app.allYamlMutex.Lock()
+	defer app.allYamlMutex.Unlock()
+
 	saver, err := output.NewLocalSaver()
 	if err != nil {
 		return fmt.Errorf("创建保存器失败: %w", err)
@@ -660,7 +669,6 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 	// 统计变量
 	var passedCount, failedCount, addedCount atomic.Int32
 	var wg sync.WaitGroup
-	var addMutex sync.Mutex // 保护 addSingleNode 调用
 
 	// 并发检测所有节点
 	for _, proxy := range proxies {
@@ -730,11 +738,8 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 			// 测速通过，添加到 all.yaml
 			passedCount.Add(1)
 
-			// 使用互斥锁保护文件写入
-			addMutex.Lock()
+			// addSingleNodeFromProxy 内部已使用全局锁保护
 			err = app.addSingleNodeFromProxy(proxyMap)
-			addMutex.Unlock()
-
 			if err == nil {
 				addedCount.Add(1)
 			}
@@ -769,7 +774,10 @@ finish:
 
 // addSingleNodeFromProxy 从 proxy map 添加单个节点到 all.yaml（内部使用）
 func (app *App) addSingleNodeFromProxy(proxy map[string]any) error {
-	// 读取现有的all.yaml
+	// 读取现有的all.yaml (使用互斥锁保护)
+	app.allYamlMutex.Lock()
+	defer app.allYamlMutex.Unlock()
+
 	saver, err := output.NewLocalSaver()
 	if err != nil {
 		return fmt.Errorf("创建保存器失败: %w", err)
