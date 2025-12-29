@@ -110,12 +110,13 @@ func Check() ([]Result, error) {
 		// 检查是否为本地订阅
 		if !localUrls[failedUrl] {
 			// 远程订阅失败时记录但不删除
-			failureCount, countErr := config.IncrementFailureCount(failedUrl)
-			if countErr != nil {
-				slog.Error("记录失败次数失败", "error", countErr, "url", failedUrl)
-			} else if config.ShouldRemoveFailedSub(failedUrl, failureCount) {
-				slog.Warn("远程订阅失败次数已达阈值", "url", failedUrl, "失败次数", failureCount, "说明", "该订阅来自远程清单，不会从本地配置中删除，请检查远程清单质量")
-			}
+			// 直接跳过判断,不输出日志
+			// failureCount, countErr := config.IncrementFailureCount(failedUrl)
+			// if countErr != nil {
+			// 	slog.Error("记录失败次数失败", "error", countErr, "url", failedUrl)
+			// } else if config.ShouldRemoveFailedSub(failedUrl, failureCount) {
+			// 	slog.Warn("远程订阅失败次数已达阈值", "url", failedUrl, "失败次数", failureCount, "说明", "该订阅来自远程清单，不会从本地配置中删除，请检查远程清单质量")
+			// }
 			continue
 		}
 
@@ -271,13 +272,13 @@ func Check() ([]Result, error) {
 	// 计算合理的超时时间并设置到tracker
 	// 基础时间 = (节点数 / 并发数 * 单节点超时) + 缓冲时间
 	baseTime := time.Duration(len(proxies)/aliveConc*config.GlobalConfig.Timeout)*time.Millisecond + 60*time.Second
-	// 乘以5倍安全系数，考虑网络波动和worker调度延迟
-	expectedTime := baseTime * 5
-	if expectedTime < 5*time.Minute {
-		expectedTime = 5 * time.Minute // 最少5分钟
+	// 乘以2倍安全系数，考虑网络波动和worker调度延迟
+	expectedTime := baseTime * 2
+	if expectedTime < 2*time.Minute {
+		expectedTime = 2 * time.Minute // 最少2分钟
 	}
-	if expectedTime > 30*time.Minute {
-		expectedTime = 30 * time.Minute // 最多30分钟
+	if expectedTime > 10*time.Minute {
+		expectedTime = 10 * time.Minute // 最多10分钟
 	}
 	tracker.SetTimeout(expectedTime)
 	slog.Info("设置存活检测超时", "预计时间", expectedTime.String(), "基础时间", baseTime.String())

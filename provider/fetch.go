@@ -176,7 +176,7 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 							return
 						}
 					} else {
-						slog.Error(fmt.Sprintf("解析proxy错误: %v", err), "url", url)
+						slog.Debug(fmt.Sprintf("解析proxy错误: %v", err), "url", url)
 						markFailed(url)
 						return
 					}
