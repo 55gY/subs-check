@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"time"
 
