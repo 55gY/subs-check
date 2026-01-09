@@ -94,18 +94,19 @@ func (app *App) addConfig(c *gin.Context) {
 
 			result := app.testAndAddNodes(proxies)
 			if result.PassedNodes == 0 {
-				errorMsg := "节点检测失败"
-				if result.Timeout {
-					errorMsg += "（检测超时）"
-				}
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error":        errorMsg,
+				response := gin.H{
+					"error":        "节点检测失败",
 					"tested_nodes": result.TestedNodes,
 					"passed_nodes": result.PassedNodes,
 					"failed_nodes": result.FailedNodes,
+					"added_nodes":  0,
 					"duration":     result.Duration,
-					"timeout":      result.Timeout,
-				})
+				}
+				if result.Timeout {
+					response["timeout"] = true
+					response["warning"] = "部分节点因超时未完成检测"
+				}
+				c.JSON(http.StatusBadRequest, response)
 				return
 			}
 
@@ -197,18 +198,20 @@ func (app *App) addConfig(c *gin.Context) {
 
 		// 至少需要有一个节点通过检测
 		if result.PassedNodes == 0 {
-			errorMsg := "订阅中没有节点通过检测"
-			if result.Timeout {
-				errorMsg += "（检测超时）"
-			}
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error":        errorMsg,
+			response := gin.H{
+				"error":        "订阅中没有节点通过检测",
+				"sub_url":      req.SubUrl,
 				"tested_nodes": result.TestedNodes,
 				"passed_nodes": result.PassedNodes,
 				"failed_nodes": result.FailedNodes,
+				"added_nodes":  0,
 				"duration":     result.Duration,
-				"timeout":      result.Timeout,
-			})
+			}
+			if result.Timeout {
+				response["timeout"] = true
+				response["warning"] = "部分节点因超时未完成检测"
+			}
+			c.JSON(http.StatusBadRequest, response)
 			return
 		}
 
