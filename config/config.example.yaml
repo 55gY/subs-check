@@ -98,6 +98,13 @@ sub-urls-retry: 1
 sub-urls-retry-interval: 2
 # 订阅链接超时时间(秒)
 sub-urls-timeout: 10
+# 订阅代理(订阅解析服务)
+# 当直连获取订阅失败后，会依次尝试使用这些代理服务获取订阅
+# 多项配置可提高容错性，任一代理成功即返回
+# 格式：代理地址 + 原始订阅URL(自动进行URL编码)
+sub-urls-proxy:
+  - https://sub.xeton.dev/sub?target=clash&scv=true&url=
+  - https://api.wcc.best/sub?target=clash&scv=true&url=
 # 订阅链接失败重试次数
 # 控制订阅链接获取失败后的处理策略：
 # > 0: 启用智能重试机制，失败N次后才删除订阅链接（推荐：3-5）

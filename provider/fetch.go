@@ -426,7 +426,6 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 	if timeout == 0 {
 		timeout = 10
 	}
-	var lastErr error
 
 	client := &http.Client{
 		Timeout: time.Duration(timeout) * time.Second,
@@ -443,6 +442,8 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 		},
 	}
 
+	// 第一阶段：直连重试
+	var directErr error
 	for i := 0; i < maxRetries; i++ {
 		if i > 0 {
 			time.Sleep(time.Duration(retryInterval) * time.Second)
@@ -450,7 +451,7 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 
 		req, err := http.NewRequest("GET", subUrl, nil)
 		if err != nil {
-			lastErr = err
+			directErr = err
 			continue
 		}
 
@@ -462,24 +463,78 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 
 		resp, err := client.Do(req)
 		if err != nil {
-			lastErr = err
+			directErr = err
 			continue
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != 200 {
-			lastErr = fmt.Errorf("订阅链接: %s 返回状态码: %d", subUrl, resp.StatusCode)
+			directErr = fmt.Errorf("订阅链接: %s 返回状态码: %d", subUrl, resp.StatusCode)
 			continue
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			lastErr = fmt.Errorf("读取订阅链接: %s 数据错误: %v", subUrl, err)
+			directErr = fmt.Errorf("读取订阅链接: %s 数据错误: %v", subUrl, err)
 			continue
 		}
 		return body, nil
 	}
 
-	return nil, fmt.Errorf("重试%d次后失败: %v", maxRetries, lastErr)
+	// 直连失败，检查是否配置了订阅代理
+	subProxies := config.GlobalConfig.SubUrlsProxy
+	if len(subProxies) == 0 {
+		// 未配置订阅代理，直接返回失败
+		slog.Warn("直连获取订阅失败，未配置订阅代理", "url", subUrl, "error", directErr)
+		return nil, fmt.Errorf("直连重试%d次后失败: %v", maxRetries, directErr)
+	}
+
+	// 第二阶段：使用订阅代理重试
+	slog.Info("直连获取订阅失败，尝试使用订阅代理", "url", subUrl, "proxy_count", len(subProxies))
+
+	for i, proxyUrl := range subProxies {
+		// 对原始订阅URL进行编码后拼接到代理URL
+		encodedUrl := u.QueryEscape(subUrl)
+		proxyFullUrl := proxyUrl + encodedUrl
+
+		slog.Info("使用订阅代理", "index", fmt.Sprintf("%d/%d", i+1, len(subProxies)), "proxy", proxyUrl)
+
+		req, err := http.NewRequest("GET", proxyFullUrl, nil)
+		if err != nil {
+			slog.Warn("创建代理请求失败", "proxy", proxyUrl, "error", err)
+			continue
+		}
+
+		if config.GlobalConfig.SubUrlsGetUA == "random" {
+			req.Header.Set("User-Agent", convert.RandUserAgent())
+		} else {
+			req.Header.Set("User-Agent", config.GlobalConfig.SubUrlsGetUA)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			slog.Warn("订阅代理请求失败", "proxy", proxyUrl, "error", err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			slog.Warn("订阅代理返回非200状态码", "proxy", proxyUrl, "status", resp.StatusCode)
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			slog.Warn("读取代理响应失败", "proxy", proxyUrl, "error", err)
+			continue
+		}
+
+		slog.Info("订阅代理获取成功", "proxy", proxyUrl)
+		return body, nil
+	}
+
+	// 所有代理都失败
+	slog.Error("直连和所有订阅代理均失败", "url", subUrl, "direct_error", directErr, "proxy_count", len(subProxies))
+	return nil, fmt.Errorf("直连重试%d次失败，所有订阅代理(%d个)也失败: %v", maxRetries, len(subProxies), directErr)
 }
 
 func extractV2RayLinks(data []byte) []string {
