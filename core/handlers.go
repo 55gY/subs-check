@@ -607,6 +607,69 @@ func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any)
 				continue
 			}
 
+		case "anytls":
+			// AnyTLS: server + port + password
+			if existing["password"] != newProxy["password"] {
+				continue
+			}
+
+		case "mieru":
+			// Mieru: server + port + username + password
+			if existing["username"] != newProxy["username"] {
+				continue
+			}
+			if existing["password"] != newProxy["password"] {
+				continue
+			}
+
+		case "sudoku":
+			// Sudoku: server + port + key
+			if existing["key"] != newProxy["key"] {
+				continue
+			}
+
+		case "wireguard", "wg":
+			// WireGuard: server + port + private-key + public-key
+			privateKey1 := existing["private-key"]
+			privateKey2 := newProxy["private-key"]
+			if privateKey1 != privateKey2 {
+				continue
+			}
+			publicKey1 := existing["public-key"]
+			publicKey2 := newProxy["public-key"]
+			if publicKey1 != publicKey2 {
+				continue
+			}
+
+		case "ssh":
+			// SSH: server + port + username + password/private-key
+			if existing["username"] != newProxy["username"] {
+				continue
+			}
+			// 检查 password 或 private-key
+			pass1 := existing["password"]
+			pass2 := newProxy["password"]
+			key1 := existing["private-key"]
+			key2 := newProxy["private-key"]
+			if pass1 != pass2 && key1 != key2 {
+				continue
+			}
+
+		case "snell":
+			// Snell: server + port + psk
+			if existing["psk"] != newProxy["psk"] {
+				continue
+			}
+
+		case "http", "socks", "socks5", "socks4":
+			// HTTP/SOCKS: server + port + username (如果有)
+			user1, hasUser1 := existing["username"].(string)
+			user2, hasUser2 := newProxy["username"].(string)
+			if hasUser1 && hasUser2 && user1 != user2 {
+				continue
+			}
+			// 如果都没有 username，仅依据 server+port 判断
+
 		default:
 			// 其他协议：比较 server + port + name
 			if existing["name"] != newProxy["name"] {
@@ -879,7 +942,8 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 			strings.HasPrefix(line, "trojan://") ||
 			strings.HasPrefix(line, "hysteria://") ||
 			strings.HasPrefix(line, "hysteria2://") ||
-			strings.HasPrefix(line, "tuic://") {
+			strings.HasPrefix(line, "tuic://") ||
+			strings.HasPrefix(line, "anytls://") {
 			links = append(links, line)
 		}
 	}
