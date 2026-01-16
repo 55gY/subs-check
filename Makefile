@@ -14,10 +14,19 @@ FLAGS := -trimpath
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.CurrentCommit=$(COMMIT)
 
 # 声明伪目标
-.PHONY: all build run gotool clean help linux-amd64 build-all
+.PHONY: all build run gotool clean help linux-amd64 build-all update-deps
 
 # 默认目标：整理代码并编译当前环境
 all:  build
+
+# 更新依赖到最新版本
+update-deps:
+	@echo "更新 mihomo 到最新版本..."
+	$(GO_BIN) get -u github.com/metacubex/mihomo@latest
+	@echo "更新其他依赖..."
+	$(GO_BIN) get -u ./...
+	$(GO_BIN) mod tidy
+	@echo "依赖更新完成！"
 
 # 默认构建：当前环境
 build:
