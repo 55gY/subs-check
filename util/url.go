@@ -27,7 +27,3 @@ func WarpUrl(url string) string {
 	return url
 }
 
-// UpdateSubs 更新订阅（原 Sub-Store 功能已移除，保留空函数以兼容）
-func UpdateSubs() {
-	// Sub-Store 功能已移除，此函数保留为空
-}
