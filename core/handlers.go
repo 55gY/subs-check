@@ -65,11 +65,11 @@ func (app *App) updateConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "配置已更新"})
 }
 
-// addConfig 向配置文件的sub-urls中新增一条数据，或添加单个节点到all.yaml
+// addConfig 添加单个或多个节点到all.yaml，或添加订阅链接到配置
 func (app *App) addConfig(c *gin.Context) {
 	var req struct {
 		SubUrl string `json:"sub_url"`
-		SS     string `json:"ss"`   // 单个节点链接（支持vmess/ss/trojan等）
+		SS     string `json:"ss"`   // 单个或多个节点链接（支持换行分隔的多个节点链接）
 		Test   bool   `json:"test"` // 是否在添加前进行检测（默认false）
 	}
 
@@ -126,12 +126,43 @@ func (app *App) addConfig(c *gin.Context) {
 			return
 		}
 
-		// 直接添加模式（原有逻辑）
-		if err := app.addSingleNode(req.SS); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("添加节点失败: %v", err)})
+		// 直接添加模式（支持多节点批量添加）
+		proxies, err := proxyutils.ParseSingleNode(req.SS)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("解析节点失败: %v", err)})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "节点已添加"})
+		if len(proxies) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "未能解析出有效节点"})
+			return
+		}
+
+		result := app.addMultipleNodesDirectly(proxies)
+		if result.AddedNodes == 0 && result.DuplicateNodes == 0 {
+			// 所有节点都失败
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":        "所有节点添加失败",
+				"tested_nodes": result.TotalNodes,
+				"passed_nodes": result.TotalNodes,
+				"failed_nodes": 0,
+				"added_nodes":  0,
+			})
+			return
+		}
+
+		// 返回统一格式的响应（与test:true格式一致）
+		response := gin.H{
+			"message":      "节点添加成功",
+			"tested_nodes": result.TotalNodes,
+			"passed_nodes": result.TotalNodes,
+			"failed_nodes": 0,
+			"added_nodes":  result.AddedNodes,
+		}
+		if result.DuplicateNodes > 0 {
+			response["duplicate_nodes"] = result.DuplicateNodes
+			response["message"] = fmt.Sprintf("成功添加 %d 个节点，%d 个节点已存在", result.AddedNodes, result.DuplicateNodes)
+		}
+		c.JSON(http.StatusOK, response)
 		return
 	}
 
@@ -446,78 +477,6 @@ func ReadLastNLines(filePath string, n int) ([]string, error) {
 	return result, nil
 }
 
-// addSingleNode 添加单个节点到all.yaml
-func (app *App) addSingleNode(nodeLink string) error {
-	// 1. 解析节点链接
-	proxies, err := proxyutils.ParseSingleNode(nodeLink)
-	if err != nil {
-		return fmt.Errorf("解析节点失败: %w", err)
-	}
-
-	if len(proxies) == 0 {
-		return fmt.Errorf("未能解析出有效节点")
-	}
-
-	// 2. 读取现有的all.yaml (使用互斥锁保护)
-	app.allYamlMutex.Lock()
-	defer app.allYamlMutex.Unlock()
-
-	saver, err := output.NewLocalSaver()
-	if err != nil {
-		return fmt.Errorf("创建保存器失败: %w", err)
-	}
-
-	allYamlPath := saver.OutputPath + "/all.yaml"
-	var existingConfig map[string]any
-
-	if data, err := os.ReadFile(allYamlPath); err == nil {
-		if err := yaml.Unmarshal(data, &existingConfig); err != nil {
-			return fmt.Errorf("解析all.yaml失败: %w", err)
-		}
-	} else {
-		// 文件不存在，创建新配置
-		existingConfig = make(map[string]any)
-	}
-
-	// 3. 获取现有proxies列表
-	var existingProxies []map[string]any
-	if proxiesInterface, ok := existingConfig["proxies"]; ok {
-		if proxiesList, ok := proxiesInterface.([]any); ok {
-			for _, p := range proxiesList {
-				if proxyMap, ok := p.(map[string]any); ok {
-					existingProxies = append(existingProxies, proxyMap)
-				}
-			}
-		}
-	}
-
-	// 4. 检查是否已存在（使用更健壮的判断方式）
-	newProxy := proxies[0]
-	if isProxyDuplicate(newProxy, existingProxies) {
-		return fmt.Errorf("节点已存在")
-	}
-
-	// 5. 添加新节点
-	existingProxies = append(existingProxies, newProxy)
-	existingConfig["proxies"] = existingProxies
-
-	// 6. 写回文件
-	newData, err := yaml.Marshal(existingConfig)
-	if err != nil {
-		return fmt.Errorf("序列化配置失败: %w", err)
-	}
-
-	if err := os.MkdirAll(saver.OutputPath, 0755); err != nil {
-		return fmt.Errorf("创建输出目录失败: %w", err)
-	}
-
-	if err := os.WriteFile(allYamlPath, newData, 0644); err != nil {
-		return fmt.Errorf("写入all.yaml失败: %w", err)
-	}
-
-	return nil
-}
-
 // isProxyDuplicate 判断节点是否重复（更健壮的判断方式）
 func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any) bool {
 	for _, existing := range existingProxies {
@@ -692,6 +651,100 @@ type TestResult struct {
 	AddedNodes  int    // 实际添加的节点数（排除重复）
 	Duration    string // 检测耗时
 	Timeout     bool   // 是否超时
+}
+
+// AddResult 节点直接添加结果（test:false模式）
+type AddResult struct {
+	TotalNodes     int // 总解析节点数
+	AddedNodes     int // 成功添加的节点数
+	DuplicateNodes int // 重复跳过的节点数
+}
+
+// addMultipleNodesDirectly 批量添加多个节点到all.yaml（不进行网络检测）
+// 使用一次性读写策略，提升性能
+func (app *App) addMultipleNodesDirectly(proxies []map[string]any) AddResult {
+	result := AddResult{
+		TotalNodes: len(proxies),
+	}
+
+	if len(proxies) == 0 {
+		return result
+	}
+
+	// 使用互斥锁保护整个读写过程
+	app.allYamlMutex.Lock()
+	defer app.allYamlMutex.Unlock()
+
+	saver, err := output.NewLocalSaver()
+	if err != nil {
+		return result
+	}
+
+	allYamlPath := saver.OutputPath + "/all.yaml"
+	var existingConfig map[string]any
+
+	// 读取现有配置
+	if data, err := os.ReadFile(allYamlPath); err == nil {
+		if err := yaml.Unmarshal(data, &existingConfig); err != nil {
+			return result
+		}
+	} else {
+		// 文件不存在，创建新配置
+		existingConfig = make(map[string]any)
+	}
+
+	// 获取现有proxies列表
+	var existingProxies []map[string]any
+	if proxiesInterface, ok := existingConfig["proxies"]; ok {
+		if proxiesList, ok := proxiesInterface.([]any); ok {
+			for _, p := range proxiesList {
+				if proxyMap, ok := p.(map[string]any); ok {
+					existingProxies = append(existingProxies, proxyMap)
+				}
+			}
+		}
+	}
+
+	// 遍历所有节点，检查重复并收集有效节点
+	var nodesToAdd []map[string]any
+	for _, proxy := range proxies {
+		if isProxyDuplicate(proxy, existingProxies) {
+			result.DuplicateNodes++
+			continue
+		}
+		// 检查是否与本次待添加列表重复
+		if isProxyDuplicate(proxy, nodesToAdd) {
+			result.DuplicateNodes++
+			continue
+		}
+		nodesToAdd = append(nodesToAdd, proxy)
+	}
+
+	// 如果没有需要添加的节点，直接返回
+	if len(nodesToAdd) == 0 {
+		return result
+	}
+
+	// 一次性追加所有有效节点
+	existingProxies = append(existingProxies, nodesToAdd...)
+	existingConfig["proxies"] = existingProxies
+
+	// 写回文件
+	newData, err := yaml.Marshal(existingConfig)
+	if err != nil {
+		return result
+	}
+
+	if err := os.MkdirAll(saver.OutputPath, 0755); err != nil {
+		return result
+	}
+
+	if err := os.WriteFile(allYamlPath, newData, 0644); err != nil {
+		return result
+	}
+
+	result.AddedNodes = len(nodesToAdd)
+	return result
 }
 
 // testAndAddNodes 统一的节点检测和添加函数
