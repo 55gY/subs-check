@@ -418,18 +418,26 @@ func getConcurrency(total int, base int, ratio float64) int {
 }
 
 // updateProxyName 更新代理名称
-func updateProxyName(res *Result, httpClient *ProxyClient, speed int) {
+// 返回 true 表示节点应被过滤（跳过）
+func updateProxyName(res *Result, httpClient *ProxyClient, speed int) bool {
 	// 以节点IP查询位置重命名节点
 	if config.GlobalConfig.RenameNode {
 		var fraudScore int
+		var country string
 		if res.Country != "" && res.IPRisk != "" {
 			// 如果已经有 Country 和 IPRisk，从 IPRisk 推导 fraudScore
 			fraudScore = parseFraudScoreFromLabel(res.IPRisk)
-			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(res.Country, fraudScore)
+			country = res.Country
+			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(country, fraudScore)
 		} else {
 			country, _, fs := proxyutils.GetProxyCountry(httpClient.Client)
 			fraudScore = fs
 			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(country, fraudScore)
+		}
+		
+		// 检查国家代码是否应被过滤
+		if shouldSkipByCountryCode(country) {
+			return true
 		}
 	}
 
@@ -506,6 +514,7 @@ func updateProxyName(res *Result, httpClient *ProxyClient, speed int) {
 	}
 
 	res.Proxy["name"] = name
+	return false
 }
 
 func showProgress(done chan bool, total int) {
@@ -553,4 +562,22 @@ func parseFraudScoreFromLabel(label string) int {
 	default:
 		return 0
 	}
+}
+// shouldSkipByCountryCode 根据国家代码判断是否应该跳过节点
+// 如果 Filters 为空，不过滤任何节点
+// 使用前缀匹配方式检查国家代码
+func shouldSkipByCountryCode(countryCode string) bool {
+	// 如果 Filters 为空，不过滤任何节点
+	if len(config.GlobalConfig.Filters) == 0 {
+		return false
+	}
+	
+	// 检查国家代码是否匹配任何过滤规则（前缀匹配）
+	for _, filter := range config.GlobalConfig.Filters {
+		if strings.HasPrefix(countryCode, filter) {
+			slog.Debug("节点被过滤", "country", countryCode, "filter", filter)
+			return true
+		}
+	}
+	return false
 }

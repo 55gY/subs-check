@@ -37,6 +37,7 @@ type Config struct {
 	Platforms             []string `yaml:"platforms"`
 	NodePrefix            string   `yaml:"node-prefix"`
 	NodeType              []string `yaml:"node-type"`
+	Filters               []string `yaml:"filters"`
 	EnableWebUI           bool     `yaml:"enable-web-ui"`
 	APIKey                string   `yaml:"api-key"`
 	GithubProxy           string   `yaml:"github-proxy"`
@@ -55,6 +56,7 @@ var GlobalConfig = &Config{
 	SubUrlsGetUA:        "clash.meta (https://github.com/55gY/subs-check)",
 	SubUrlsRetryFailed:  -1, // 默认永不删除，避免误删用户订阅
 	SubUrlsMinNodeCount: 0,  // 默认不启用节点数量检查
+	Filters:             []string{"CN"},
 }
 
 //go:embed config.example.yaml

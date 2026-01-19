@@ -109,7 +109,11 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 				tracker.mediaDone.Add(1)
 				mediaOut <- item
 			} else {
-				updateProxyName(item.Result, client, 0)
+				if updateProxyName(item.Result, client, 0) {
+					// 节点被过滤，关闭连接并跳过
+					client.Close()
+					continue
+				}
 				Available.Add(1)
 				resOut <- *item.Result
 				client.Close()
@@ -155,7 +159,11 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				tracker.mediaDone.Add(1)
 				mediaOut <- item
 			} else {
-				updateProxyName(item.Result, item.Client, speed)
+				if updateProxyName(item.Result, item.Client, speed) {
+					// 节点被过滤，关闭连接并跳过
+					item.Client.Close()
+					continue
+				}
 				Available.Add(1)
 				resOut <- *item.Result
 				item.Client.Close()
@@ -216,7 +224,11 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 			}
 
 			tracker.CountMedia()
-			updateProxyName(item.Result, item.Client, item.Speed)
+			if updateProxyName(item.Result, item.Client, item.Speed) {
+				// 节点被过滤，关闭连接并跳过
+				item.Client.Close()
+				continue
+			}
 
 			Available.Add(1)
 			resOut <- *item.Result
