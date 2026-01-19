@@ -488,7 +488,7 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 	}
 
 	// 第二阶段：使用订阅代理重试
-	for i, proxyUrl := range subProxies {
+	for _, proxyUrl := range subProxies {
 		// 对原始订阅URL进行编码后拼接到代理URL
 		encodedUrl := u.QueryEscape(subUrl)
 		proxyFullUrl := proxyUrl + encodedUrl
