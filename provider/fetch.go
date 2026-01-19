@@ -484,23 +484,17 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 	subProxies := config.GlobalConfig.SubUrlsProxy
 	if len(subProxies) == 0 {
 		// 未配置订阅代理，直接返回失败
-		slog.Warn("直连获取订阅失败，未配置订阅代理", "url", subUrl, "error", directErr)
 		return nil, fmt.Errorf("直连重试%d次后失败: %v", maxRetries, directErr)
 	}
 
 	// 第二阶段：使用订阅代理重试
-	slog.Info("直连获取订阅失败，尝试使用订阅代理", "url", subUrl, "proxy_count", len(subProxies))
-
 	for i, proxyUrl := range subProxies {
 		// 对原始订阅URL进行编码后拼接到代理URL
 		encodedUrl := u.QueryEscape(subUrl)
 		proxyFullUrl := proxyUrl + encodedUrl
 
-		slog.Info("使用订阅代理", "index", fmt.Sprintf("%d/%d", i+1, len(subProxies)), "proxy", proxyUrl)
-
 		req, err := http.NewRequest("GET", proxyFullUrl, nil)
 		if err != nil {
-			slog.Warn("创建代理请求失败", "proxy", proxyUrl, "error", err)
 			continue
 		}
 
@@ -512,23 +506,19 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 
 		resp, err := client.Do(req)
 		if err != nil {
-			slog.Warn("订阅代理请求失败", "proxy", proxyUrl, "error", err)
 			continue
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != 200 {
-			slog.Warn("订阅代理返回非200状态码", "proxy", proxyUrl, "status", resp.StatusCode)
 			continue
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			slog.Warn("读取代理响应失败", "proxy", proxyUrl, "error", err)
 			continue
 		}
 
-		slog.Info("订阅代理获取成功", "proxy", proxyUrl)
 		return body, nil
 	}
 
