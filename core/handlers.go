@@ -52,6 +52,30 @@ func (app *App) updateConfig(c *gin.Context) {
 		return
 	}
 
+	// 检查 sub-urls 中是否存在重复项
+	if existing, ok := yamlData["sub-urls"]; ok {
+		if urls, ok := existing.([]any); ok {
+			seenUrls := make(map[string]bool)
+			var duplicates []string
+			for _, url := range urls {
+				if strUrl, ok := url.(string); ok {
+					if seenUrls[strUrl] {
+						duplicates = append(duplicates, strUrl)
+					} else {
+						seenUrls[strUrl] = true
+					}
+				}
+			}
+			if len(duplicates) > 0 {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":      "配置中存在重复的订阅链接",
+					"duplicates": duplicates,
+				})
+				return
+			}
+		}
+	}
+
 	// 写入新配置 (使用互斥锁保护)
 	app.configMutex.Lock()
 	defer app.configMutex.Unlock()
@@ -174,7 +198,7 @@ func (app *App) addConfig(c *gin.Context) {
 	// 声明测试结果变量（如果启用了检测）
 	var testResult TestResult
 
-	// 读取现有配置
+	// 第一次去重检查（在锁外，快速失败）
 	configData, err := os.ReadFile(app.configPath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("读取配置文件失败: %v", err)})
@@ -251,8 +275,35 @@ func (app *App) addConfig(c *gin.Context) {
 		// 继续执行添加订阅链接的逻辑...
 	}
 
+	// 第二次去重检查（在获取锁前，确保测速期间配置未被修改）
+	configData2, err := os.ReadFile(app.configPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("读取配置文件失败: %v", err)})
+		return
+	}
+
+	var yamlData2 map[string]any
+	if err := yaml.Unmarshal(configData2, &yamlData2); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析配置文件失败: %v", err)})
+		return
+	}
+
+	// 再次检查是否已存在（可能在测速期间被其他请求添加）
+	if existing, ok := yamlData2["sub-urls"]; ok {
+		if urls, ok := existing.([]any); ok {
+			for _, url := range urls {
+				if strUrl, ok := url.(string); ok {
+					if strUrl == req.SubUrl {
+						c.JSON(http.StatusConflict, gin.H{"error": "该订阅链接已存在"})
+						return
+					}
+				}
+			}
+		}
+	}
+
+	// 二次检查通过，获取锁准备写入文件
 	// 使用字符串追加的方式，保留原有格式和注释
-	// 重新读取文件以逐行处理 (使用互斥锁保护)
 	app.configMutex.Lock()
 	defer app.configMutex.Unlock()
 
