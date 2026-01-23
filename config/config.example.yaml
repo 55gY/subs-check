@@ -129,8 +129,32 @@ sub-urls-retry-failed: 3
 # 注意：此检查在节点类型过滤（node-type）之后、去重之前执行
 sub-urls-min-node-count: 0
 # 获取订阅时使用的UA；如果设置random将会使用随机UA获取订阅
+# 建议使用真实浏览器的UA，提高订阅获取成功率
+# Chrome示例：
+# sub-urls-get-ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+# Firefox示例：
+# sub-urls-get-ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
 # sub-urls-get-ua: "random"
-sub-urls-get-ua: "clash.meta"
+sub-urls-get-ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+# 自定义订阅请求头（可选，用于模拟真实浏览器请求）
+# 如果订阅服务器有防爬虫机制，可以配置完整的浏览器请求头
+# 以下是 Firefox 浏览器的标准请求头示例（可根据需要修改）
+sub-urls-headers:
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+  Accept-Language: "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2"
+  Accept-Encoding: "gzip, deflate, br, zstd"
+  DNT: "1"
+  Sec-GPC: "1"
+  Connection: "keep-alive"
+  Upgrade-Insecure-Requests: "1"
+  Sec-Fetch-Dest: "document"
+  Sec-Fetch-Mode: "navigate"
+  Sec-Fetch-Site: "none"
+  Sec-Fetch-User: "?1"
+  Priority: "u=0, i"
+  Pragma: "no-cache"
+  Cache-Control: "no-cache"
 # Github Proxy，获取订阅使用，结尾要带的 /
 github-proxy: "https://ghfast.top/"
 # 此参数更通用，适用于拉取代理、消息推送、文件上传等等

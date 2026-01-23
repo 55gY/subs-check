@@ -44,6 +44,33 @@ func (app *App) loadConfig() error {
 		return fmt.Errorf("解析配置文件失败: %w", err)
 	}
 
+	// 加载配置后，去除SubUrls中的重复项
+	if len(config.GlobalConfig.SubUrls) > 0 {
+		seenUrls := make(map[string]bool)
+		var uniqueUrls []string
+		duplicateCount := 0
+		
+		for _, url := range config.GlobalConfig.SubUrls {
+			if !seenUrls[url] {
+				seenUrls[url] = true
+				uniqueUrls = append(uniqueUrls, url)
+			} else {
+				duplicateCount++
+			}
+		}
+		
+		// 如果发现重复项，更新配置并保存
+		if duplicateCount > 0 {
+			slog.Warn(fmt.Sprintf("配置中发现 %d 个重复订阅链接，已自动去除", duplicateCount))
+			config.GlobalConfig.SubUrls = uniqueUrls
+			
+			// 调用去重函数清理配置文件
+			if err := config.DeduplicateSubUrlsFromConfig(); err != nil {
+				slog.Warn(fmt.Sprintf("自动去重配置文件失败: %v", err))
+			}
+		}
+	}
+
 	slog.Info("配置文件读取成功",
 		"speed-test-url", config.GlobalConfig.SpeedTestUrl,
 		"min-speed", config.GlobalConfig.MinSpeed,

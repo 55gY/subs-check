@@ -52,27 +52,29 @@ func (app *App) updateConfig(c *gin.Context) {
 		return
 	}
 
-	// 检查 sub-urls 中是否存在重复项
+	// 去除 sub-urls 中的重复项
 	if existing, ok := yamlData["sub-urls"]; ok {
 		if urls, ok := existing.([]any); ok {
 			seenUrls := make(map[string]bool)
-			var duplicates []string
+			var uniqueUrls []any
 			for _, url := range urls {
 				if strUrl, ok := url.(string); ok {
-					if seenUrls[strUrl] {
-						duplicates = append(duplicates, strUrl)
-					} else {
+					if !seenUrls[strUrl] {
 						seenUrls[strUrl] = true
+						uniqueUrls = append(uniqueUrls, strUrl)
 					}
 				}
 			}
-			if len(duplicates) > 0 {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error":      "配置中存在重复的订阅链接",
-					"duplicates": duplicates,
-				})
+			// 更新为去重后的列表
+			yamlData["sub-urls"] = uniqueUrls
+			
+			// 重新序列化为YAML
+			deduplicatedData, err := yaml.Marshal(yamlData)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("序列化YAML失败: %v", err)})
 				return
 			}
+			req.Content = string(deduplicatedData)
 		}
 	}
 

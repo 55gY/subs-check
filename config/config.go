@@ -9,51 +9,64 @@ import (
 )
 
 type Config struct {
-	PrintProgress        bool     `yaml:"print-progress"`
-	Concurrent           int      `yaml:"concurrent"`
-	CheckInterval        int      `yaml:"check-interval"`
-	CronExpression       string   `yaml:"cron-expression"`
-	AliveTestUrl         string   `yaml:"alive-test-url"`
-	SpeedTestUrl         string   `yaml:"speed-test-url"`
-	DownloadTimeout      int      `yaml:"download-timeout"`
-	DownloadMB           int      `yaml:"download-mb"`
-	TotalSpeedLimit      int      `yaml:"total-speed-limit"`
-	MinSpeed             int      `yaml:"min-speed"`
-	Timeout              int      `yaml:"timeout"`
-	SubUrlsReTry         int      `yaml:"sub-urls-retry"`
-	SubUrlsRetryInterval int      `yaml:"sub-urls-retry-interval"`
-	SubUrlsTimeout       int      `yaml:"sub-urls-timeout"`
-	SubUrlsProxy         []string `yaml:"sub-urls-proxy"`
-	SubUrlsGetUA         string   `yaml:"sub-urls-get-ua"`
-	SubUrlsRemote        []string `yaml:"sub-urls-remote"`
-	SubUrls              []string `yaml:"sub-urls"`
-	ListenPort            string   `yaml:"listen-port"`
-	RenameNode            bool     `yaml:"rename-node"`
-	OutputDir             string   `yaml:"output-dir"`
-	AppriseApiServer      string   `yaml:"apprise-api-server"`
-	RecipientUrl          []string `yaml:"recipient-url"`
-	NotifyTitle           string   `yaml:"notify-title"`
-	MediaCheck            bool     `yaml:"media-check"`
-	Platforms             []string `yaml:"platforms"`
-	NodePrefix            string   `yaml:"node-prefix"`
-	NodeType              []string `yaml:"node-type"`
-	Filters               []string `yaml:"filters"`
-	EnableWebUI           bool     `yaml:"enable-web-ui"`
-	APIKey                string   `yaml:"api-key"`
-	GithubProxy           string   `yaml:"github-proxy"`
-	Proxy                 string   `yaml:"proxy"`
-	SubUrlsRetryFailed    int      `yaml:"sub-urls-retry-failed"`
-	SubUrlsMinNodeCount   int      `yaml:"sub-urls-min-node-count"`
+	PrintProgress        bool              `yaml:"print-progress"`
+	Concurrent           int               `yaml:"concurrent"`
+	CheckInterval        int               `yaml:"check-interval"`
+	CronExpression       string            `yaml:"cron-expression"`
+	AliveTestUrl         string            `yaml:"alive-test-url"`
+	SpeedTestUrl         string            `yaml:"speed-test-url"`
+	DownloadTimeout      int               `yaml:"download-timeout"`
+	DownloadMB           int               `yaml:"download-mb"`
+	TotalSpeedLimit      int               `yaml:"total-speed-limit"`
+	MinSpeed             int               `yaml:"min-speed"`
+	Timeout              int               `yaml:"timeout"`
+	SubUrlsReTry         int               `yaml:"sub-urls-retry"`
+	SubUrlsRetryInterval int               `yaml:"sub-urls-retry-interval"`
+	SubUrlsTimeout       int               `yaml:"sub-urls-timeout"`
+	SubUrlsProxy         []string          `yaml:"sub-urls-proxy"`
+	SubUrlsGetUA         string            `yaml:"sub-urls-get-ua"`
+	SubUrlsHeaders       map[string]string `yaml:"sub-urls-headers"`
+	SubUrlsRemote        []string          `yaml:"sub-urls-remote"`
+	SubUrls              []string          `yaml:"sub-urls"`
+	ListenPort           string            `yaml:"listen-port"`
+	RenameNode           bool              `yaml:"rename-node"`
+	OutputDir            string            `yaml:"output-dir"`
+	AppriseApiServer     string            `yaml:"apprise-api-server"`
+	RecipientUrl         []string          `yaml:"recipient-url"`
+	NotifyTitle          string            `yaml:"notify-title"`
+	MediaCheck           bool              `yaml:"media-check"`
+	Platforms            []string          `yaml:"platforms"`
+	NodePrefix           string            `yaml:"node-prefix"`
+	NodeType             []string          `yaml:"node-type"`
+	Filters              []string          `yaml:"filters"`
+	EnableWebUI          bool              `yaml:"enable-web-ui"`
+	APIKey               string            `yaml:"api-key"`
+	GithubProxy          string            `yaml:"github-proxy"`
+	Proxy                string            `yaml:"proxy"`
+	SubUrlsRetryFailed   int               `yaml:"sub-urls-retry-failed"`
+	SubUrlsMinNodeCount  int               `yaml:"sub-urls-min-node-count"`
 }
 
 var GlobalConfig = &Config{
 	// 新增配置，给未更改配置文件的用户一个默认值
-	ListenPort:          ":8199",
-	NotifyTitle:         "🔔 节点状态更新",
-	Platforms:           []string{"openai", "youtube", "netflix", "disney", "gemini"},
-	DownloadMB:          20,
-	AliveTestUrl:        "http://gstatic.com/generate_204",
-	SubUrlsGetUA:        "clash.meta (https://github.com/55gY/subs-check)",
+	ListenPort:  ":8199",
+	NotifyTitle: "🔔 节点状态更新",
+	Platforms:   []string{"openai", "youtube", "netflix", "disney", "gemini"},
+	DownloadMB:  20,
+	AliveTestUrl: "http://gstatic.com/generate_204",
+	SubUrlsGetUA: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+	SubUrlsHeaders: map[string]string{
+		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+		"Accept-Language":           "zh-CN,zh;q=0.9,en;q=0.8",
+		"Accept-Encoding":           "gzip, deflate, br",
+		"Connection":                "keep-alive",
+		"Upgrade-Insecure-Requests": "1",
+		"Sec-Fetch-Dest":            "document",
+		"Sec-Fetch-Mode":            "navigate",
+		"Sec-Fetch-Site":            "none",
+		"Sec-Fetch-User":            "?1",
+		"Cache-Control":             "max-age=0",
+	},
 	SubUrlsRetryFailed:  -1, // 默认永不删除，避免误删用户订阅
 	SubUrlsMinNodeCount: 0,  // 默认不启用节点数量检查
 	Filters:             []string{"CN"},
@@ -64,6 +77,87 @@ var DefaultConfigTemplate []byte
 
 // GlobalConfigPath 全局配置文件路径
 var GlobalConfigPath string
+
+// DeduplicateSubUrls 去除配置文件中sub-urls的重复项（保留注释和格式）
+func DeduplicateSubUrls(configPath string) error {
+	// 读取配置文件
+	file, err := os.Open(configPath)
+	if err != nil {
+		return fmt.Errorf("打开配置文件失败: %w", err)
+	}
+	defer file.Close()
+
+	var newLines []string
+	scanner := bufio.NewScanner(file)
+	inSubUrls := false
+	seenUrls := make(map[string]bool) // 记录已经出现的URL
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmedLine := strings.TrimSpace(line)
+
+		// 检测 sub-urls 部分
+		if !inSubUrls && (trimmedLine == "sub-urls:" || trimmedLine == "sub-urls: []") {
+			inSubUrls = true
+			newLines = append(newLines, line)
+			continue
+		}
+
+		shouldSkip := false
+		if inSubUrls {
+			// 检测缩进
+			if len(line) > 0 && line[0] == ' ' {
+				// 找到 sub-urls 下的项
+				for i, ch := range line {
+					if ch == '-' {
+						// 提取URL部分（去掉 "- " 和前后空格）
+						urlPart := strings.TrimSpace(line[i+1:])
+						// 去掉可能的引号
+						urlPart = strings.Trim(urlPart, `"'`)
+						
+						// 检查是否重复
+						if seenUrls[urlPart] {
+							// 重复的URL，跳过这一行
+							shouldSkip = true
+						} else {
+							// 第一次出现，记录它
+							seenUrls[urlPart] = true
+						}
+						break
+					}
+				}
+			} else if len(line) > 0 && line[0] != ' ' && line[0] != '#' {
+				// 遇到新的顶级配置项，sub-urls 部分结束
+				inSubUrls = false
+			}
+		}
+
+		// 只有不需要跳过的行才添加
+		if !shouldSkip {
+			newLines = append(newLines, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("读取配置文件失败: %w", err)
+	}
+
+	// 写入更新后的配置
+	newContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(configPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("保存配置文件失败: %w", err)
+	}
+
+	return nil
+}
+
+// DeduplicateSubUrlsFromConfig 去除全局配置文件中sub-urls的重复项
+func DeduplicateSubUrlsFromConfig() error {
+	if GlobalConfigPath == "" {
+		return fmt.Errorf("配置文件路径未设置")
+	}
+	return DeduplicateSubUrls(GlobalConfigPath)
+}
 
 // RemoveSubUrlFromConfig 从配置文件中删除指定的订阅链接（保留注释和格式）
 func RemoveSubUrlFromConfig(subUrl string) error {

@@ -455,10 +455,19 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 			continue
 		}
 
+		// 设置 User-Agent
 		if config.GlobalConfig.SubUrlsGetUA == "random" {
 			req.Header.Set("User-Agent", convert.RandUserAgent())
 		} else {
 			req.Header.Set("User-Agent", config.GlobalConfig.SubUrlsGetUA)
+		}
+
+		// 设置其他自定义请求头
+		for key, value := range config.GlobalConfig.SubUrlsHeaders {
+			// 跳过 User-Agent，因为已经单独处理
+			if key != "User-Agent" {
+				req.Header.Set(key, value)
+			}
 		}
 
 		resp, err := client.Do(req)
@@ -498,10 +507,19 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 			continue
 		}
 
+		// 设置 User-Agent
 		if config.GlobalConfig.SubUrlsGetUA == "random" {
 			req.Header.Set("User-Agent", convert.RandUserAgent())
 		} else {
 			req.Header.Set("User-Agent", config.GlobalConfig.SubUrlsGetUA)
+		}
+
+		// 设置其他自定义请求头
+		for key, value := range config.GlobalConfig.SubUrlsHeaders {
+			// 跳过 User-Agent，因为已经单独处理
+			if key != "User-Agent" {
+				req.Header.Set(key, value)
+			}
 		}
 
 		resp, err := client.Do(req)
