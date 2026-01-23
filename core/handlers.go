@@ -53,29 +53,63 @@ func (app *App) updateConfig(c *gin.Context) {
 		return
 	}
 
-	// 去除 sub-urls 中的重复项
+	// 去除 sub-urls 中的重复项（保留原有格式和注释）
 	if existing, ok := yamlData["sub-urls"]; ok {
 		if urls, ok := existing.([]any); ok {
+			// 提取所有订阅URL
 			seenUrls := make(map[string]bool)
-			var uniqueUrls []any
+			var uniqueUrlsInOrder []string
 			for _, url := range urls {
 				if strUrl, ok := url.(string); ok {
-					if !seenUrls[strUrl] {
+					strUrl = strings.TrimSpace(strUrl)
+					if strUrl != "" && !seenUrls[strUrl] {
 						seenUrls[strUrl] = true
-						uniqueUrls = append(uniqueUrls, strUrl)
+						uniqueUrlsInOrder = append(uniqueUrlsInOrder, strUrl)
 					}
 				}
 			}
-			// 更新为去重后的列表
-			yamlData["sub-urls"] = uniqueUrls
-			
-			// 重新序列化为YAML
-			deduplicatedData, err := yaml.Marshal(yamlData)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("序列化YAML失败: %v", err)})
-				return
+
+			// 如果有重复，则逐行处理原始内容
+			if len(uniqueUrlsInOrder) < len(urls) {
+				lines := strings.Split(req.Content, "\n")
+				var newLines []string
+				inSubUrls := false
+				processedUrls := make(map[string]bool)
+
+				for _, line := range lines {
+					trimmedLine := strings.TrimSpace(line)
+
+					// 检测 sub-urls 部分
+					if trimmedLine == "sub-urls:" || trimmedLine == "sub-urls: []" {
+						inSubUrls = true
+						newLines = append(newLines, line)
+						continue
+					}
+
+					// 如果在 sub-urls 部分
+					if inSubUrls {
+						// 检测是否为 sub-urls 的项
+						if strings.HasPrefix(trimmedLine, "- ") {
+							// 提取URL
+							url := strings.TrimSpace(strings.TrimPrefix(trimmedLine, "- "))
+							if url != "" && !processedUrls[url] {
+								processedUrls[url] = true
+								newLines = append(newLines, line)
+							}
+							// 跳过重复的URL行
+							continue
+						} else if len(trimmedLine) > 0 && trimmedLine[0] != ' ' && trimmedLine[0] != '#' {
+							// 遇到新的顶级配置项，sub-urls 部分结束
+							inSubUrls = false
+						}
+					}
+
+					// 保留其他所有行（包括注释）
+					newLines = append(newLines, line)
+				}
+
+				req.Content = strings.Join(newLines, "\n")
 			}
-			req.Content = string(deduplicatedData)
 		}
 	}
 
