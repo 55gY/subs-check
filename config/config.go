@@ -25,7 +25,6 @@ type Config struct {
 	SubUrlsTimeout       int               `yaml:"sub-urls-timeout"`
 	SubUrlsProxy         []string          `yaml:"sub-urls-proxy"`
 	SubUrlsGetUA         string            `yaml:"sub-urls-get-ua"`
-	SubUrlsHeaders       map[string]string `yaml:"sub-urls-headers"`
 	SubUrlsRemote        []string          `yaml:"sub-urls-remote"`
 	SubUrls              []string          `yaml:"sub-urls"`
 	ListenPort           string            `yaml:"listen-port"`
@@ -54,19 +53,7 @@ var GlobalConfig = &Config{
 	Platforms:   []string{"openai", "youtube", "netflix", "disney", "gemini"},
 	DownloadMB:  20,
 	AliveTestUrl: "http://gstatic.com/generate_204",
-	SubUrlsGetUA: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-	SubUrlsHeaders: map[string]string{
-		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-		"Accept-Language":           "zh-CN,zh;q=0.9,en;q=0.8",
-		"Accept-Encoding":           "gzip, deflate, br",
-		"Connection":                "keep-alive",
-		"Upgrade-Insecure-Requests": "1",
-		"Sec-Fetch-Dest":            "document",
-		"Sec-Fetch-Mode":            "navigate",
-		"Sec-Fetch-Site":            "none",
-		"Sec-Fetch-User":            "?1",
-		"Cache-Control":             "max-age=0",
-	},
+	SubUrlsGetUA: "clash",
 	SubUrlsRetryFailed:  -1, // 默认永不删除，避免误删用户订阅
 	SubUrlsMinNodeCount: 0,  // 默认不启用节点数量检查
 	Filters:             []string{"CN"},
