@@ -1043,7 +1043,9 @@ func (app *App) addSingleNodeFromProxy(proxy map[string]any) error {
 // parseSubscriptionNodes 解析订阅内容为节点列表
 func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 	// 尝试 base64 解码，失败就用原数据
-	if decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data))); err == nil {
+	// 注意：只去除两端的空格和制表符，保留换行符以便正确分割节点
+	trimmedData := strings.Trim(string(data), " \t\r")
+	if decoded, err := base64.StdEncoding.DecodeString(trimmedData); err == nil {
 		// 简单验证：解码后的内容应该包含常见协议或 proxies 关键字
 		decodedStr := string(decoded)
 		if strings.Contains(decodedStr, "://") || strings.Contains(decodedStr, "proxies:") {
