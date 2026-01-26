@@ -1040,6 +1040,14 @@ func (app *App) addSingleNodeFromProxy(proxy map[string]any) error {
 	return nil
 }
 
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // parseSubscriptionNodes 解析订阅内容为节点列表
 func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 	// 尝试 base64 解码，失败就用原数据
@@ -1076,13 +1084,7 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 		}
 	}
 
-	// 尝试 V2Ray 链接格式
-	proxyList, err := convert.ConvertsV2Ray(data)
-	if err == nil && len(proxyList) > 0 {
-		return proxyList, nil
-	}
-
-	// 尝试正则提取链接
+	// 先尝试逐行提取链接（更可靠的方式）
 	lines := strings.Split(string(data), "\n")
 	var links []string
 	for _, line := range lines {
@@ -1100,11 +1102,34 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 		}
 	}
 
+	// 如果找到了链接，用换行符连接后解析
 	if len(links) > 0 {
 		extractedData := []byte(strings.Join(links, "\n"))
-		proxyList, err = convert.ConvertsV2Ray(extractedData)
+		proxyList, err := convert.ConvertsV2Ray(extractedData)
 		if err == nil && len(proxyList) > 0 {
 			return proxyList, nil
+		}
+	}
+
+	// 作为后备方案，直接尝试 V2Ray 链接格式（可能是单行或其他格式）
+	proxyList, err := convert.ConvertsV2Ray(data)
+	if err == nil && len(proxyList) > 0 {
+		return proxyList, nil
+	}
+
+	// 解析失败，将数据写入日志文件以便调试
+	logFile := fmt.Sprintf("parse_error_%d.log", time.Now().Unix())
+	if f, err := os.Create(logFile); err == nil {
+		defer f.Close()
+		f.WriteString(fmt.Sprintf("=== 解析失败时间: %s ===\n", time.Now().Format("2006-01-02 15:04:05")))
+		f.WriteString(fmt.Sprintf("数据长度: %d 字节\n", len(data)))
+		f.WriteString(fmt.Sprintf("提取的链接数: %d\n", len(links)))
+		f.WriteString(fmt.Sprintf("\n=== 完整原始数据 ===\n%s\n", string(data)))
+		if len(links) > 0 {
+			f.WriteString(fmt.Sprintf("\n=== 提取的链接(前10个) ===\n"))
+			for i, link := range links[:min(10, len(links))] {
+				f.WriteString(fmt.Sprintf("%d: %s\n", i+1, link))
+			}
 		}
 	}
 
