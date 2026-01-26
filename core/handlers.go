@@ -1050,14 +1050,23 @@ func min(a, b int) int {
 
 // parseSubscriptionNodes 解析订阅内容为节点列表
 func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
+	// 保存原始数据用于日志
+	originalData := make([]byte, len(data))
+	copy(originalData, data)
+	
 	// 尝试 base64 解码，失败就用原数据
 	// 注意：只去除两端的空格和制表符，保留换行符以便正确分割节点
 	trimmedData := strings.Trim(string(data), " \t\r")
+	wasDecoded := false
+	var decodedData []byte
+	
 	if decoded, err := base64.StdEncoding.DecodeString(trimmedData); err == nil {
 		// 简单验证：解码后的内容应该包含常见协议或 proxies 关键字
 		decodedStr := string(decoded)
 		if strings.Contains(decodedStr, "://") || strings.Contains(decodedStr, "proxies:") {
+			decodedData = decoded
 			data = decoded
+			wasDecoded = true
 		}
 	}
 
@@ -1122,9 +1131,26 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 	if f, err := os.Create(logFile); err == nil {
 		defer f.Close()
 		f.WriteString(fmt.Sprintf("=== 解析失败时间: %s ===\n", time.Now().Format("2006-01-02 15:04:05")))
-		f.WriteString(fmt.Sprintf("数据长度: %d 字节\n", len(data)))
+		f.WriteString(fmt.Sprintf("\n=== 原始数据 ===\n"))
+		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(originalData)))
+		f.WriteString(fmt.Sprintf("内容:\n%s\n", string(originalData)))
+		
+		f.WriteString(fmt.Sprintf("\n=== Trim后的数据 ===\n"))
+		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(trimmedData)))
+		f.WriteString(fmt.Sprintf("内容:\n%s\n", trimmedData))
+		
+		if wasDecoded {
+			f.WriteString(fmt.Sprintf("\n=== Base64解码后的数据 ===\n"))
+			f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(decodedData)))
+			f.WriteString(fmt.Sprintf("内容:\n%s\n", string(decodedData)))
+		} else {
+			f.WriteString("\n=== Base64解码 ===\n未进行解码或解码失败\n")
+		}
+		
+		f.WriteString(fmt.Sprintf("\n=== 最终处理的数据 ===\n"))
+		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(data)))
 		f.WriteString(fmt.Sprintf("提取的链接数: %d\n", len(links)))
-		f.WriteString(fmt.Sprintf("\n=== 完整原始数据 ===\n%s\n", string(data)))
+		
 		if len(links) > 0 {
 			f.WriteString(fmt.Sprintf("\n=== 提取的链接(前10个) ===\n"))
 			for i, link := range links[:min(10, len(links))] {
