@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	u "net/url"
 	"regexp"
@@ -28,6 +29,90 @@ var SubsFetchProgress atomic.Int32 // 已完成数
 var SubsFetchTotal atomic.Int32    // 总数
 var SubsFetchSuccess atomic.Int32  // 成功数
 var SubsFetchFailed atomic.Int32   // 失败数
+
+// 缓存的备用网络接口
+var alternativeInterfaces []net.IP
+var interfacesOnce sync.Once
+
+// getAlternativeInterfaces 获取所有可用的备用网络接口（排除默认接口）
+func getAlternativeInterfaces() []net.IP {
+	interfacesOnce.Do(func() {
+		interfaces, err := net.Interfaces()
+		if err != nil {
+			return
+		}
+
+		var ips []net.IP
+		for _, iface := range interfaces {
+			// 只保留状态为UP且非Loopback的接口
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+
+			// 过滤虚拟接口
+			name := strings.ToLower(iface.Name)
+			if strings.HasPrefix(name, "docker") ||
+				strings.HasPrefix(name, "veth") ||
+				strings.HasPrefix(name, "br-") ||
+				strings.HasPrefix(name, "virbr") ||
+				strings.HasPrefix(name, "vmnet") {
+				continue
+			}
+
+			// 获取接口的IP地址
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+
+			for _, addr := range addrs {
+				ipNet, ok := addr.(*net.IPNet)
+				if !ok {
+					continue
+				}
+				ip := ipNet.IP
+
+				// 只保留IPv4地址
+				if ip.To4() != nil && !ip.IsLoopback() {
+					ips = append(ips, ip)
+				}
+			}
+		}
+		alternativeInterfaces = ips
+	})
+	return alternativeInterfaces
+}
+
+// createHTTPClient 创建HTTP客户端，可选指定本地出口IP
+func createHTTPClient(timeout int, localIP net.IP) *http.Client {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// 如果指定了本地IP，使用自定义Dialer
+	if localIP != nil {
+		transport.DialContext = (&net.Dialer{
+			LocalAddr: &net.TCPAddr{
+				IP: localIP,
+			},
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext
+	}
+
+	return &http.Client{
+		Timeout:   time.Duration(timeout) * time.Second,
+		Transport: transport,
+	}
+}
 
 func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error) {
 
@@ -427,22 +512,8 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 		timeout = 10
 	}
 
-	client := &http.Client{
-		Timeout: time.Duration(timeout) * time.Second,
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-			ForceAttemptHTTP2:     true,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
-	}
-
-	// 第一阶段：直连重试
+	// 阶段1：使用默认接口直连重试
+	client := createHTTPClient(timeout, nil)
 	var directErr error
 	for i := 0; i < maxRetries; i++ {
 		if i > 0 {
@@ -481,14 +552,53 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 		return body, nil
 	}
 
-	// 直连失败，检查是否配置了订阅代理
+	// 阶段2：使用备用接口直连重试
+	altInterfaces := getAlternativeInterfaces()
+	for _, localIP := range altInterfaces {
+		altClient := createHTTPClient(timeout, localIP)
+		
+		for i := 0; i < maxRetries; i++ {
+			if i > 0 {
+				time.Sleep(time.Duration(retryInterval) * time.Second)
+			}
+
+			req, err := http.NewRequest("GET", subUrl, nil)
+			if err != nil {
+				continue
+			}
+
+			// 设置 User-Agent
+			if config.GlobalConfig.SubUrlsGetUA == "random" {
+				req.Header.Set("User-Agent", convert.RandUserAgent())
+			} else {
+				req.Header.Set("User-Agent", config.GlobalConfig.SubUrlsGetUA)
+			}
+
+			resp, err := altClient.Do(req)
+			if err != nil {
+				continue
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				continue
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				continue
+			}
+			return body, nil
+		}
+	}
+
+	// 检查是否配置了订阅代理
 	subProxies := config.GlobalConfig.SubUrlsProxy
 	if len(subProxies) == 0 {
 		// 未配置订阅代理，直接返回失败
 		return nil, fmt.Errorf("直连重试%d次后失败: %v", maxRetries, directErr)
 	}
 
-	// 第二阶段：使用订阅代理重试
+	// 阶段3：使用默认接口+订阅代理重试
 	for _, proxyUrl := range subProxies {
 		// 对原始订阅URL进行编码后拼接到代理URL
 		encodedUrl := u.QueryEscape(subUrl)
@@ -524,7 +634,47 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 		return body, nil
 	}
 
-	// 所有代理都失败
+	// 阶段4：使用备用接口+订阅代理重试
+	for _, localIP := range altInterfaces {
+		altClient := createHTTPClient(timeout, localIP)
+		
+		for _, proxyUrl := range subProxies {
+			// 对原始订阅URL进行编码后拼接到代理URL
+			encodedUrl := u.QueryEscape(subUrl)
+			proxyFullUrl := proxyUrl + encodedUrl
+
+			req, err := http.NewRequest("GET", proxyFullUrl, nil)
+			if err != nil {
+				continue
+			}
+
+			// 设置 User-Agent
+			if config.GlobalConfig.SubUrlsGetUA == "random" {
+				req.Header.Set("User-Agent", convert.RandUserAgent())
+			} else {
+				req.Header.Set("User-Agent", config.GlobalConfig.SubUrlsGetUA)
+			}
+
+			resp, err := altClient.Do(req)
+			if err != nil {
+				continue
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != 200 {
+				continue
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				continue
+			}
+
+			return body, nil
+		}
+	}
+
+	// 所有尝试都失败
 	slog.Error("直连和所有订阅代理均失败", "url", subUrl, "direct_error", directErr, "proxy_count", len(subProxies))
 	return nil, fmt.Errorf("直连重试%d次失败，所有订阅代理(%d个)也失败: %v", maxRetries, len(subProxies), directErr)
 }
