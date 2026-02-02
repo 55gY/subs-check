@@ -71,11 +71,38 @@ func (app *App) loadConfig() error {
 		}
 	}
 
+	// 如果配置了 filters，自动确保 iprisk 在 platforms 中
+	ensureIpriskInPlatforms()
+
 	slog.Info("配置文件读取成功",
 		"speed-test-url", config.GlobalConfig.SpeedTestUrl,
 		"min-speed", config.GlobalConfig.MinSpeed,
 		"alive-test-url", config.GlobalConfig.AliveTestUrl)
 	return nil
+}
+
+// ensureIpriskInPlatforms 确保当配置了 filters 时，iprisk 平台自动添加到 platforms 列表
+// 这样可以确保 Country 字段被正确设置，过滤功能才能正常工作
+func ensureIpriskInPlatforms() {
+	// 检查是否配置了 filters
+	if len(config.GlobalConfig.Filters) == 0 {
+		return
+	}
+
+	// 检查 platforms 中是否已有 iprisk
+	hasIprisk := false
+	for _, plat := range config.GlobalConfig.Platforms {
+		if plat == "iprisk" {
+			hasIprisk = true
+			break
+		}
+	}
+
+	// 如果没有 iprisk，则自动添加
+	if !hasIprisk {
+		config.GlobalConfig.Platforms = append(config.GlobalConfig.Platforms, "iprisk")
+		slog.Info("检测到 filters 配置，已自动启用 iprisk 平台以支持节点过滤功能")
+	}
 }
 
 // createDefaultConfig 创建默认配置文件
