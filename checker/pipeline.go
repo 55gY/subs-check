@@ -400,6 +400,12 @@ func getConcurrency(total int, base int, ratio float64) int {
 		target = 1
 	}
 
+	// 添加硬性上限保护，避免过高并发导致资源耗尽
+	const maxConcurrency = 100 // 最大并发数
+	if target > maxConcurrency {
+		target = maxConcurrency
+	}
+
 	// 根据节点总数自适应调整并发数
 	// 节点少于100时使用较低并发避免资源浪费
 	// 节点较多时使用完整的 target 值提高处理速度

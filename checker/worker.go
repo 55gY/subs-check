@@ -43,9 +43,9 @@ func aliveWorkerCollect(ctx context.Context, in <-chan PipelineItem, results *[]
 			item.Client = client
 			item.Result = &Result{Proxy: item.ProxyMap}
 
-			google, err := CheckAlive(client.Client)
+			google, latency, err := CheckAliveWithWarmup(client.Client)
 			if err != nil || !google {
-				slog.Debug("存活检测失败", "proxy", item.ProxyMap["name"], "error", err)
+				slog.Debug("存活检测失败（收集模式）", "proxy", item.ProxyMap["name"], "latency", latency, "error", err)
 				client.Close()
 				tracker.CountAlive(false)
 				continue
@@ -90,9 +90,9 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 			item.Client = client
 			item.Result = &Result{Proxy: item.ProxyMap}
 
-			google, err := CheckAlive(client.Client)
+			google, latency, err := CheckAliveWithWarmup(client.Client)
 			if err != nil || !google {
-				slog.Debug("存活检测失败", "proxy", item.ProxyMap["name"], "error", err)
+				slog.Debug("存活检测失败", "proxy", item.ProxyMap["name"], "latency", latency, "error", err)
 				client.Close()
 				tracker.CountAlive(false)
 				continue

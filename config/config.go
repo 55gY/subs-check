@@ -20,6 +20,9 @@ type Config struct {
 	TotalSpeedLimit      int               `yaml:"total-speed-limit"`
 	MinSpeed             int               `yaml:"min-speed"`
 	Timeout              int               `yaml:"timeout"`
+	UnifiedDelay         bool              `yaml:"unified-delay"`          // 是否启用统一延迟（两次测试）
+	WarmupTimeout        int               `yaml:"warmup-timeout"`         // 预热阶段超时（秒）
+	TestTimeout          int               `yaml:"test-timeout"`           // 实际测试超时（秒）
 	SubUrlsReTry         int               `yaml:"sub-urls-retry"`
 	SubUrlsRetryInterval int               `yaml:"sub-urls-retry-interval"`
 	SubUrlsTimeout       int               `yaml:"sub-urls-timeout"`
@@ -57,6 +60,10 @@ var GlobalConfig = &Config{
 	SubUrlsRetryFailed:  -1, // 默认永不删除，避免误删用户订阅
 	SubUrlsMinNodeCount: 0,  // 默认不启用节点数量检查
 	Filters:             []string{"CN"},
+	// 统一延迟配置默认值
+	UnifiedDelay:  false, // 默认关闭，保持向后兼容
+	WarmupTimeout: 15,    // 预热超时 15 秒
+	TestTimeout:   10,    // 实际测试超时 10 秒
 }
 
 //go:embed config.example.yaml
