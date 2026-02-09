@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/55gY/subs-check/checker"
 	"github.com/55gY/subs-check/config"
@@ -1055,18 +1058,47 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 	copy(originalData, data)
 	
 	// 尝试 base64 解码，失败就用原数据
-	// 注意：只去除两端的空格和制表符，保留换行符以便正确分割节点
-	trimmedData := strings.Trim(string(data), " \t\r")
+	// 注意：去除所有空白字符，支持 URL-safe base64，自动补齐 padding
+	trimmedData := strings.ReplaceAll(string(data), " ", "")
+	trimmedData = strings.ReplaceAll(trimmedData, "\n", "")
+	trimmedData = strings.ReplaceAll(trimmedData, "\r", "")
+	trimmedData = strings.ReplaceAll(trimmedData, "\t", "")
+	// 将 URL-safe base64 字符替换为标准格式
+	trimmedData = strings.ReplaceAll(trimmedData, "-", "+")
+	trimmedData = strings.ReplaceAll(trimmedData, "_", "/")
+	// 自动补齐 padding
+	padLen := len(trimmedData) % 4
+	if padLen > 0 {
+		trimmedData += strings.Repeat("=", 4-padLen)
+	}
+	
 	wasDecoded := false
 	var decodedData []byte
 	
 	if decoded, err := base64.StdEncoding.DecodeString(trimmedData); err == nil {
-		// 简单验证：解码后的内容应该包含常见协议或 proxies 关键字
-		decodedStr := string(decoded)
-		if strings.Contains(decodedStr, "://") || strings.Contains(decodedStr, "proxies:") {
-			decodedData = decoded
-			data = decoded
-			wasDecoded = true
+		// 启发式验证：检查解码结果是否是有效文本
+		isValidText := true
+		for i := 0; i < len(decoded) && i < 100; i++ {
+			c := decoded[i]
+			// 允许 Tab(9), LF(10), CR(13)
+			if c == 9 || c == 10 || c == 13 {
+				continue
+			}
+			// 其他控制字符和 DEL(127) 认为无效
+			if c < 32 || c == 127 {
+				isValidText = false
+				break
+			}
+		}
+		
+		if isValidText {
+			// 简单验证：解码后的内容应该包含常见协议或 proxies 关键字
+			decodedStr := string(decoded)
+			if strings.Contains(decodedStr, "://") || strings.Contains(decodedStr, "proxies:") {
+				decodedData = decoded
+				data = decoded
+				wasDecoded = true
+			}
 		}
 	}
 
@@ -1076,18 +1108,23 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 	var con map[string]any
 	err := yaml.Unmarshal(data, &con)
 	if err == nil {
-		// YAML 格式成功解析
-		proxyInterface, ok := con["proxies"]
-		if ok && proxyInterface != nil {
-			proxyList, ok := proxyInterface.([]any)
-			if ok {
-				for _, p := range proxyList {
-					if proxyMap, ok := p.(map[string]any); ok {
-						proxies = append(proxies, proxyMap)
+		// 验证必须包含 proxies 或 proxy-providers
+		if !containsKey(con, "proxies") && !containsKey(con, "proxy-providers") {
+			// 不是标准 Clash 配置，继续其他解析方式
+		} else {
+			// YAML 格式成功解析
+			proxyInterface, ok := con["proxies"]
+			if ok && proxyInterface != nil {
+				proxyList, ok := proxyInterface.([]any)
+				if ok {
+					for _, p := range proxyList {
+						if proxyMap, ok := p.(map[string]any); ok {
+							proxies = append(proxies, proxyMap)
+						}
 					}
-				}
-				if len(proxies) > 0 {
-					return proxies, nil
+					if len(proxies) > 0 {
+						return proxies, nil
+					}
 				}
 			}
 		}
@@ -1126,33 +1163,88 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 		return proxyList, nil
 	}
 
-	// 解析失败，将数据写入日志文件以便调试
+	// 解析失败，清理旧日志并将数据写入日志文件以便调试
+	cleanupOldParseLogs()
+	
 	logFile := fmt.Sprintf("parse_error_%d.log", time.Now().Unix())
 	if f, err := os.Create(logFile); err == nil {
 		defer f.Close()
 		f.WriteString(fmt.Sprintf("=== 解析失败时间: %s ===\n", time.Now().Format("2006-01-02 15:04:05")))
-		f.WriteString(fmt.Sprintf("\n=== 原始数据 ===\n"))
-		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(originalData)))
-		f.WriteString(fmt.Sprintf("内容:\n%s\n", string(originalData)))
 		
-		f.WriteString(fmt.Sprintf("\n=== Trim后的数据 ===\n"))
-		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(trimmedData)))
-		f.WriteString(fmt.Sprintf("内容:\n%s\n", trimmedData))
-		
-		if wasDecoded {
-			f.WriteString(fmt.Sprintf("\n=== Base64解码后的数据 ===\n"))
-			f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(decodedData)))
-			f.WriteString(fmt.Sprintf("内容:\n%s\n", string(decodedData)))
+		// 字符编码信息
+		f.WriteString("\n=== 字符编码检测 ===\n")
+		if len(originalData) >= 3 && originalData[0] == 0xEF && originalData[1] == 0xBB && originalData[2] == 0xBF {
+			f.WriteString("检测到 UTF-8 BOM: 是\n")
 		} else {
-			f.WriteString("\n=== Base64解码 ===\n未进行解码或解码失败\n")
+			f.WriteString("检测到 UTF-8 BOM: 否\n")
+		}
+		f.WriteString(fmt.Sprintf("数据有效性: UTF-8=%v\n", utf8.Valid(originalData)))
+		
+		// 原始数据
+		f.WriteString("\n=== 原始数据 ===\n")
+		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(originalData)))
+		f.WriteString(fmt.Sprintf("内容（前1000字节）:\n%s\n", string(originalData[:min(1000, len(originalData))])))
+		
+		// Base64 解码信息
+		f.WriteString("\n=== Base64 解码尝试 ===\n")
+		if wasDecoded {
+			f.WriteString("解码结果: 成功\n")
+			f.WriteString(fmt.Sprintf("解码后长度: %d 字节\n", len(decodedData)))
+			f.WriteString(fmt.Sprintf("解码后内容（前1000字节）:\n%s\n", string(decodedData[:min(1000, len(decodedData))])))
+		} else {
+			f.WriteString("解码结果: 未解码或解码失败\n")
 		}
 		
+		// YAML 解析详情
+		f.WriteString("\n=== YAML 解析详情 ===\n")
+		var con map[string]any
+		if err := yaml.Unmarshal(data, &con); err == nil {
+			f.WriteString("YAML 语法: 有效\n")
+			f.WriteString(fmt.Sprintf("包含 'proxies' 字段: %v\n", containsKey(con, "proxies")))
+			f.WriteString(fmt.Sprintf("包含 'proxy-providers' 字段: %v\n", containsKey(con, "proxy-providers")))
+			
+			if proxyInterface, ok := con["proxies"]; ok && proxyInterface != nil {
+				if proxyList, ok := proxyInterface.([]any); ok {
+					f.WriteString(fmt.Sprintf("proxies 数组长度: %d\n", len(proxyList)))
+					if len(proxyList) > 0 {
+						f.WriteString(fmt.Sprintf("第一个元素类型: %T\n", proxyList[0]))
+						if pm, ok := proxyList[0].(map[string]any); ok {
+							f.WriteString("第一个元素的前 5 个字段:\n")
+							count := 0
+							for k, v := range pm {
+								if count >= 5 {
+									break
+								}
+								f.WriteString(fmt.Sprintf("  %s: %v (类型: %T)\n", k, v, v))
+								count++
+							}
+						}
+					}
+				} else {
+					f.WriteString(fmt.Sprintf("proxies 类型错误: %T（期望 []any）\n", proxyInterface))
+				}
+			}
+		} else {
+			f.WriteString(fmt.Sprintf("YAML 语法: 无效 - %v\n", err))
+		}
+		
+		// 前 20 个节点名称（检查乱码）
+		if len(proxies) > 0 {
+			f.WriteString(fmt.Sprintf("\n=== 前 20 个节点名称 ===\n"))
+			for i := 0; i < min(20, len(proxies)); i++ {
+				if name, ok := proxies[i]["name"]; ok {
+					f.WriteString(fmt.Sprintf("%d: %v\n", i+1, name))
+				}
+			}
+		}
+		
+		// 提取的链接信息
 		f.WriteString(fmt.Sprintf("\n=== 最终处理的数据 ===\n"))
 		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(data)))
 		f.WriteString(fmt.Sprintf("提取的链接数: %d\n", len(links)))
 		
 		if len(links) > 0 {
-			f.WriteString(fmt.Sprintf("\n=== 提取的链接(前10个) ===\n"))
+			f.WriteString(fmt.Sprintf("\n=== 提取的链接（前10个）===\n"))
 			for i, link := range links[:min(10, len(links))] {
 				f.WriteString(fmt.Sprintf("%d: %s\n", i+1, link))
 			}
@@ -1160,4 +1252,51 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 	}
 
 	return nil, fmt.Errorf("无法解析订阅内容")
+}
+
+// containsKey 检查 map 中是否包含指定的 key
+func containsKey(m map[string]any, key string) bool {
+	_, ok := m[key]
+	return ok
+}
+
+// cleanupOldParseLogs 清理超过 2 天的 parse_error 日志文件
+func cleanupOldParseLogs() {
+	files, err := filepath.Glob("parse_error_*.log")
+	if err != nil {
+		slog.Debug("查找 parse_error 日志文件失败", "error", err)
+		return
+	}
+	
+	now := time.Now()
+	twoDaysAgo := now.AddDate(0, 0, -2).Truncate(24 * time.Hour)
+	
+	for _, file := range files {
+		// 从文件名提取时间戳：parse_error_<timestamp>.log
+		basename := filepath.Base(file)
+		if !strings.HasPrefix(basename, "parse_error_") || !strings.HasSuffix(basename, ".log") {
+			continue
+		}
+		
+		timestampStr := strings.TrimPrefix(basename, "parse_error_")
+		timestampStr = strings.TrimSuffix(timestampStr, ".log")
+		
+		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
+		if err != nil {
+			slog.Debug("解析日志文件时间戳失败", "file", file, "error", err)
+			continue
+		}
+		
+		fileTime := time.Unix(timestamp, 0)
+		fileDateOnly := fileTime.Truncate(24 * time.Hour)
+		
+		// 删除超过 2 天的日志（保留今天和昨天）
+		if fileDateOnly.Before(twoDaysAgo) {
+			if err := os.Remove(file); err != nil {
+				slog.Debug("删除旧日志文件失败", "file", file, "error", err)
+			} else {
+				slog.Debug("删除旧日志文件", "file", file, "date", fileDateOnly.Format("2006-01-02"))
+			}
+		}
+	}
 }

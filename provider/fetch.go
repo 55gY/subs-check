@@ -16,11 +16,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/55gY/subs-check/config"
 	"github.com/55gY/subs-check/util"
 	"github.com/metacubex/mihomo/common/convert"
 	"github.com/samber/lo"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/traditionalchinese"
+	"golang.org/x/text/transform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -88,29 +92,42 @@ func createHTTPClient(timeout int, localIP net.IP) *http.Client {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: true, // 接受无效证书
 		},
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          0,              // 禁用连接池
+		MaxIdleConnsPerHost:   0,              // 禁用每个主机的连接池
+		DisableKeepAlives:     true,           // 禁用 Keep-Alive
+		IdleConnTimeout:       0,              // 立即关闭空闲连接
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
-	// 如果指定了本地IP，使用自定义Dialer
-	if localIP != nil {
-		transport.DialContext = (&net.Dialer{
-			LocalAddr: &net.TCPAddr{
-				IP: localIP,
-			},
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext
+	// 设置 Dialer（连接超时固定为 30 秒）
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second, // 连接超时
+		KeepAlive: 0,                // 禁用 Keep-Alive
 	}
 
+	// 如果指定了本地IP，设置本地地址
+	if localIP != nil {
+		dialer.LocalAddr = &net.TCPAddr{
+			IP: localIP,
+		}
+	}
+
+	transport.DialContext = dialer.DialContext
+
 	return &http.Client{
-		Timeout:   time.Duration(timeout) * time.Second,
+		Timeout:   time.Duration(timeout) * time.Second, // 总超时
 		Transport: transport,
+		// 限制重定向最多 10 次
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			return nil
+		},
 	}
 }
 
@@ -549,6 +566,8 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 			directErr = fmt.Errorf("读取订阅链接: %s 数据错误: %v", subUrl, err)
 			continue
 		}
+		// 处理字符编码
+		body = processEncoding(body)
 		return body, nil
 	}
 
@@ -587,6 +606,8 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 			if err != nil {
 				continue
 			}
+			// 处理字符编码
+			body = processEncoding(body)
 			return body, nil
 		}
 	}
@@ -630,7 +651,8 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 		if err != nil {
 			continue
 		}
-
+		// 处理字符编码
+		body = processEncoding(body)
 		return body, nil
 	}
 
@@ -669,7 +691,8 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 			if err != nil {
 				continue
 			}
-
+			// 处理字符编码
+			body = processEncoding(body)
 			return body, nil
 		}
 	}
@@ -759,4 +782,53 @@ func convertUnStandandJsonViaConvert(data map[string]any) []map[string]any {
 		}
 	}
 	return nil
+}
+
+// processEncoding 处理字符编码问题（移除 BOM、转换 GBK/GB18030/Big5 为 UTF-8）
+func processEncoding(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+
+	// 1. 移除 UTF-8 BOM（EF BB BF）
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		slog.Debug("检测到 UTF-8 BOM，已移除")
+		data = data[3:]
+	}
+
+	// 2. 检查是否为有效的 UTF-8
+	if utf8.Valid(data) {
+		// 已经是有效的 UTF-8，直接返回
+		return data
+	}
+
+	slog.Debug("检测到非 UTF-8 编码，尝试转换")
+
+	// 3. 尝试 GBK 解码
+	if decoded, err := io.ReadAll(transform.NewReader(bytes.NewReader(data), simplifiedchinese.GBK.NewDecoder())); err == nil {
+		if utf8.Valid(decoded) {
+			slog.Debug("成功从 GBK 转换为 UTF-8")
+			return decoded
+		}
+	}
+
+	// 4. 尝试 GB18030 解码
+	if decoded, err := io.ReadAll(transform.NewReader(bytes.NewReader(data), simplifiedchinese.GB18030.NewDecoder())); err == nil {
+		if utf8.Valid(decoded) {
+			slog.Debug("成功从 GB18030 转换为 UTF-8")
+			return decoded
+		}
+	}
+
+	// 5. 尝试 Big5 解码
+	if decoded, err := io.ReadAll(transform.NewReader(bytes.NewReader(data), traditionalchinese.Big5.NewDecoder())); err == nil {
+		if utf8.Valid(decoded) {
+			slog.Debug("成功从 Big5 转换为 UTF-8")
+			return decoded
+		}
+	}
+
+	// 6. 所有转换都失败，记录日志并返回原始数据
+	slog.Debug("字符编码转换失败，保留原始数据")
+	return data
 }
