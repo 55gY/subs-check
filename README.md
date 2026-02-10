@@ -60,11 +60,12 @@ Subs-Check 是一个轻量级、高性能的订阅节点检测工具，专为代
 ### 方法一：一键安装（Ubuntu/Debian）
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/55gY/subs-check/master/subs-check.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/55gY/subs-check/HEAD/subs-check.sh)
 ```
 
 安装脚本会自动：
 - 从 GitHub Releases 下载最新版本
+- 自动检测仓库默认分支
 - 下载默认配置文件
 - 创建 systemd 服务
 - 设置开机自启动
@@ -88,8 +89,8 @@ cd subs-check
 # 创建配置目录
 mkdir -p config
 
-# 下载示例配置
-wget -O config/config.yaml https://raw.githubusercontent.com/55gY/subs-check/master/config/config.example.yaml
+# 下载示例配置（使用 HEAD 自动匹配默认分支）
+wget -O config/config.yaml https://raw.githubusercontent.com/55gY/subs-check/HEAD/config/config.example.yaml
 
 # 编辑配置文件
 nano config/config.yaml

@@ -358,11 +358,32 @@ download_binary() {
     echo -e "${GREEN}✓ 二进制文件安装成功${NC}"
 }
 
+# 获取仓库默认分支
+get_default_branch() {
+    local api_url="https://api.github.com/repos/${GITHUB_REPO}"
+    local default_branch
+    
+    if command -v curl &> /dev/null; then
+        default_branch=$(curl -s "$api_url" | grep -o '"default_branch": *"[^"]*"' | sed 's/"default_branch": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+    else
+        default_branch=$(wget -qO- "$api_url" | grep -o '"default_branch": *"[^"]*"' | sed 's/"default_branch": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+    fi
+    
+    # 如果获取失败，回退到 master
+    if [ -z "$default_branch" ]; then
+        default_branch="master"
+    fi
+    
+    echo "$default_branch"
+}
+
 # 下载配置文件
 download_config() {
-    local config_url="https://raw.githubusercontent.com/${GITHUB_REPO}/master/config/config.example.yaml"
+    local default_branch=$(get_default_branch)
+    local config_url="https://raw.githubusercontent.com/${GITHUB_REPO}/${default_branch}/config/config.example.yaml"
     
     echo -e "${YELLOW}正在下载示例配置文件...${NC}"
+    echo -e "${CYAN}使用分支: ${default_branch}${NC}"
     
     mkdir -p "$(dirname "$CONFIG_PATH")"
     
