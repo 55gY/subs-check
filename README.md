@@ -60,12 +60,7 @@ Subs-Check 是一个轻量级、高性能的订阅节点检测工具，专为代
 ### 方法一：一键安装（Ubuntu/Debian）
 
 ```bash
-# 下载安装脚本
-curl -O https://raw.githubusercontent.com/55gY/subs-check/master/subs-check.sh
-chmod +x subs-check.sh
-
-# 以 root 权限运行（会自动下载二进制和配置文件）
-sudo bash subs-check.sh
+bash <(curl -Ls https://raw.githubusercontent.com/55gY/subs-check/master/subs-check.sh)
 ```
 
 安装脚本会自动：

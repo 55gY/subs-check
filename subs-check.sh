@@ -126,25 +126,93 @@ check_root() {
     fi
 }
 
-# 检查必要工具
+# 检查并安装必要工具
 check_dependencies() {
-    local missing_deps=()
+    echo -e "${CYAN}正在检查依赖...${NC}"
     
+    local missing_deps=()
+    local need_install=0
+    
+    # 检查下载工具
     if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
-        missing_deps+=("curl 或 wget")
+        missing_deps+=("curl")
+        need_install=1
     fi
     
+    # 检查解压工具
     if ! command -v tar &> /dev/null; then
         missing_deps+=("tar")
+        need_install=1
     fi
     
-    if [ ${#missing_deps[@]} -gt 0 ]; then
-        echo -e "${RED}错误: 缺少必要工具: ${missing_deps[*]}${NC}"
-        echo ""
-        echo "安装方法:"
-        echo "  Ubuntu/Debian: sudo apt-get install curl tar"
-        echo "  CentOS/RHEL:   sudo yum install curl tar"
-        exit 1
+    if ! command -v gzip &> /dev/null; then
+        missing_deps+=("gzip")
+        need_install=1
+    fi
+    
+    # 检查 file 命令（用于验证文件类型）
+    if ! command -v file &> /dev/null; then
+        missing_deps+=("file")
+        need_install=1
+    fi
+    
+    # 如果有缺失依赖，尝试自动安装
+    if [ $need_install -eq 1 ]; then
+        echo -e "${YELLOW}缺少必要工具: ${missing_deps[*]}${NC}"
+        echo -e "${BLUE}正在尝试自动安装...${NC}"
+        
+        # 检测系统包管理器并安装
+        if command -v apt-get &> /dev/null; then
+            echo -e "${GREEN}检测到 apt-get 包管理器${NC}"
+            apt-get update -qq
+            apt-get install -y curl tar gzip file
+        elif command -v yum &> /dev/null; then
+            echo -e "${GREEN}检测到 yum 包管理器${NC}"
+            yum install -y curl tar gzip file
+        elif command -v dnf &> /dev/null; then
+            echo -e "${GREEN}检测到 dnf 包管理器${NC}"
+            dnf install -y curl tar gzip file
+        elif command -v apk &> /dev/null; then
+            echo -e "${GREEN}检测到 apk 包管理器${NC}"
+            apk add --no-cache curl tar gzip file
+        elif command -v pacman &> /dev/null; then
+            echo -e "${GREEN}检测到 pacman 包管理器${NC}"
+            pacman -Sy --noconfirm curl tar gzip file
+        else
+            echo -e "${RED}错误: 无法识别系统包管理器${NC}"
+            echo ""
+            echo "请手动安装必要工具:"
+            echo "  Ubuntu/Debian: sudo apt-get install curl tar gzip file"
+            echo "  CentOS/RHEL:   sudo yum install curl tar gzip file"
+            echo "  Fedora:        sudo dnf install curl tar gzip file"
+            echo "  Alpine:        sudo apk add curl tar gzip file"
+            echo "  Arch:          sudo pacman -S curl tar gzip file"
+            exit 1
+        fi
+        
+        # 再次检查是否安装成功
+        if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+            echo -e "${RED}错误: 下载工具安装失败${NC}"
+            exit 1
+        fi
+        
+        if ! command -v tar &> /dev/null; then
+            echo -e "${RED}错误: tar 安装失败${NC}"
+            exit 1
+        fi
+        
+        if ! command -v gzip &> /dev/null; then
+            echo -e "${RED}错误: gzip 安装失败${NC}"
+            exit 1
+        fi
+        
+        if ! command -v file &> /dev/null; then
+            echo -e "${YELLOW}警告: file 命令安装失败，将跳过文件类型验证${NC}"
+        fi
+        
+        echo -e "${GREEN}✓ 依赖安装完成${NC}"
+    else
+        echo -e "${GREEN}✓ 所有依赖已满足${NC}"
     fi
 }
 
@@ -155,13 +223,59 @@ get_latest_release_url() {
     local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases"
     local download_url
     
-    # 获取所有 releases（包括 pre-release），取第一个包含 tar.gz 的下载链接
+    # 检测系统架构
+    local arch=$(uname -m)
+    local arch_pattern
+    case "$arch" in
+        x86_64|amd64)
+            arch_pattern="x86_64"
+            ;;
+        aarch64|arm64)
+            arch_pattern="arm64"
+            ;;
+        armv7l)
+            arch_pattern="armv7"
+            ;;
+        *)
+            echo -e "${YELLOW}警告: 未知架构 $arch，尝试使用 x86_64${NC}" >&2
+            arch_pattern="x86_64"
+            ;;
+    esac
+    
+    # 检测操作系统
+    local os=$(uname -s)
+    local os_pattern
+    case "$os" in
+        Linux)
+            os_pattern="Linux"
+            ;;
+        Darwin)
+            os_pattern="Darwin"
+            ;;
+        *)
+            echo -e "${YELLOW}警告: 未知操作系统 $os，尝试使用 Linux${NC}" >&2
+            os_pattern="Linux"
+            ;;
+    esac
+    
+    echo -e "${CYAN}检测到系统: ${os_pattern} ${arch_pattern}${NC}" >&2
+    
+    # 获取所有 releases（包括 pre-release），查找匹配当前系统的下载链接
     if command -v curl &> /dev/null; then
-        # 使用 curl 获取，并过滤出第一个 tar.gz 文件的下载链接
-        download_url=$(curl -s "$api_url" | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+        # 首先尝试精确匹配系统和架构
+        download_url=$(curl -s "$api_url" | grep -o '"browser_download_url": *"[^"]*'"${os_pattern}"'[^"]*'"${arch_pattern}"'[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+        
+        # 如果没找到，尝试只匹配 tar.gz（兼容旧版本）
+        if [ -z "$download_url" ]; then
+            download_url=$(curl -s "$api_url" | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+        fi
     else
         # 使用 wget 获取
-        download_url=$(wget -qO- "$api_url" | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+        download_url=$(wget -qO- "$api_url" | grep -o '"browser_download_url": *"[^"]*'"${os_pattern}"'[^"]*'"${arch_pattern}"'[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+        
+        if [ -z "$download_url" ]; then
+            download_url=$(wget -qO- "$api_url" | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+        fi
     fi
     
     if [ -z "$download_url" ]; then
@@ -172,7 +286,9 @@ get_latest_release_url() {
     
     # 显示即将下载的版本信息
     local version=$(echo "$download_url" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+-[0-9]\+' || echo "未知版本")
+    local filename=$(basename "$download_url")
     echo -e "${GREEN}找到最新版本: ${version}${NC}" >&2
+    echo -e "${CYAN}文件名: ${filename}${NC}" >&2
     
     echo "$download_url"
 }
@@ -205,9 +321,15 @@ download_binary() {
         fi
         
         if [ $? -eq 0 ] && [ -f "$tmp_file" ] && [ -s "$tmp_file" ]; then
-            success=1
-            echo -e "${GREEN}✓ 下载成功${NC}"
-            break
+            # 验证文件是否为正确的 gzip 格式
+            if file "$tmp_file" 2>/dev/null | grep -q "gzip compressed data"; then
+                success=1
+                echo -e "${GREEN}✓ 下载成功${NC}"
+                break
+            else
+                echo -e "${YELLOW}下载的文件格式不正确，尝试下一个镜像...${NC}"
+                rm -f "$tmp_file"
+            fi
         else
             echo -e "${YELLOW}下载失败，尝试下一个镜像...${NC}"
             rm -f "$tmp_file"
