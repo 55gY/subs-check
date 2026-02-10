@@ -15,7 +15,15 @@ MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 # 配置变量
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 检测脚本执行方式，决定安装目录
+if [ -f "${BASH_SOURCE[0]}" ]; then
+    # 从文件执行，使用脚本所在目录
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    # 从管道执行（curl | bash），使用固定目录
+    SCRIPT_DIR="$HOME/subs-check"
+fi
+
 BINARY_PATH="${SCRIPT_DIR}/subs-check"
 CONFIG_PATH="${SCRIPT_DIR}/config/config.yaml"
 SERVICE_NAME="subs-check.service"
@@ -345,6 +353,9 @@ download_binary() {
     
     echo -e "${YELLOW}正在解压...${NC}"
     
+    # 确保安装目录存在
+    mkdir -p "$SCRIPT_DIR"
+    
     # 创建临时目录用于解压
     local tmp_extract_dir="/tmp/subs-check-extract-$$"
     mkdir -p "$tmp_extract_dir"
@@ -521,6 +532,13 @@ cmd_install() {
     echo -e "${GREEN}=== 开始安装 subs-check ===${NC}"
     echo ""
     
+    # 显示安装路径信息
+    echo -e "${CYAN}安装目录: ${SCRIPT_DIR}${NC}"
+    echo -e "${CYAN}执行文件: ${BINARY_PATH}${NC}"
+    echo -e "${CYAN}配置文件: ${CONFIG_PATH}${NC}"
+    echo -e "${CYAN}输出目录: ${SCRIPT_DIR}/output${NC}"
+    echo ""
+    
     # 检查是否已安装
     if [ -f "$BINARY_PATH" ] || [ -f "$SERVICE_PATH" ]; then
         echo -e "${YELLOW}检测到已安装的版本${NC}"
@@ -547,6 +565,10 @@ cmd_install() {
     else
         echo -e "${GREEN}✓ 配置文件已存在，保留现有配置${NC}"
     fi
+    
+    # 创建输出目录
+    mkdir -p "${SCRIPT_DIR}/output"
+    echo -e "${GREEN}✓ 输出目录已创建${NC}"
     
     # 创建 systemd 服务
     create_systemd_service
