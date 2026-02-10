@@ -426,6 +426,7 @@ download_config() {
     
     echo -e "${YELLOW}正在下载示例配置文件...${NC}"
     echo -e "${CYAN}使用分支: ${default_branch}${NC}"
+    echo -e "${CYAN}文件路径: config/config.example.yaml${NC}"
     
     mkdir -p "$(dirname "$CONFIG_PATH")"
     
@@ -441,17 +442,18 @@ download_config() {
         fi
         
         if command -v curl &> /dev/null; then
-            curl -L --connect-timeout 10 --max-time 60 --retry 3 --retry-delay 2 \
-                 -o "$CONFIG_PATH" "$url"
+            curl -L --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 \
+                 -o "$CONFIG_PATH" "$url" 2>/dev/null
         else
-            wget --timeout=10 --tries=3 --waitretry=2 \
-                 -O "$CONFIG_PATH" "$url"
+            wget --timeout=10 --tries=2 --waitretry=1 \
+                 -O "$CONFIG_PATH" "$url" 2>/dev/null
         fi
         
+        # 验证下载是否成功
         if [ $? -eq 0 ] && [ -f "$CONFIG_PATH" ] && [ -s "$CONFIG_PATH" ]; then
             # 验证文件是否为有效的 YAML（不是 HTML 错误页面）
-            if head -n 5 "$CONFIG_PATH" | grep -qiE '(<html|<!DOCTYPE|<head|<body)'; then
-                echo -e "${YELLOW}下载的文件是 HTML 页面，尝试下一个镜像...${NC}"
+            if head -n 5 "$CONFIG_PATH" | grep -qiE '(<html|<!DOCTYPE|<head|<body|404)'; then
+                echo -e "${YELLOW}下载的文件是 HTML 错误页面，尝试下一个镜像...${NC}"
                 rm -f "$CONFIG_PATH"
             elif head -n 1 "$CONFIG_PATH" | grep -q '^#\|^[a-zA-Z]'; then
                 # 检查文件开头是否像 YAML（注释或配置项）
@@ -468,6 +470,7 @@ download_config() {
         fi
     done
     
+    # 如果所有镜像都失败，尝试使用 GitHub API
     if [ $success -eq 0 ]; then
         echo -e "${YELLOW}所有镜像下载失败，尝试使用 GitHub API...${NC}"
         
