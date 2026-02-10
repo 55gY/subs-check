@@ -452,15 +452,16 @@ func Check() ([]Result, error) {
 		speedWG.Wait()
 		slog.Info("测速检测完成", 
 			"发送数", speedSentCount.Load(), 
-			"接收数", speedReceivedCount.Load())
+			"处理数", tracker.speedDone.Load(),
+			"通过数", tracker.speedSuccess.Load())
 		close(mediaChan)
 	}()
 	go func() {
 		mediaWG.Wait()
 		if mediaON {
 			slog.Info("媒体检测完成", 
-				"发送数", speedReceivedCount.Load(), 
-				"接收数", mediaReceivedCount.Load())
+				"发送数", tracker.speedSuccess.Load(), 
+				"处理数", tracker.mediaDone.Load())
 		}
 		close(resultChan)
 	}()

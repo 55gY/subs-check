@@ -124,6 +124,18 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 
 func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- PipelineItem, resOut chan<- Result, tracker *ProgressTracker, mediaON bool, receivedCounter *atomic.Int32) {
 	processedCount := 0
+	failedCount := 0
+	slowCount := 0
+	// 速度区间统计
+	speedStats := struct {
+		under10   int // <10 KB/s
+		under50   int // 10-50 KB/s
+		under100  int // 50-100 KB/s
+		under500  int // 100-500 KB/s
+		under1000 int // 500-1000 KB/s
+		over1000  int // >=1000 KB/s
+	}{}
+	
 	for {
 		select {
 		case <-ctx.Done():
@@ -131,21 +143,54 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 			return
 		case item, ok := <-in:
 			if !ok {
-				// slog.Info("speedWorker接收到关闭信号", "已处理", processedCount)
+				if processedCount > 0 {
+					slog.Info("speedWorker完成", 
+						"总处理", processedCount, 
+						"测速失败", failedCount, 
+						"速度过慢", slowCount)
+					slog.Info("测速统计", 
+						"<10KB/s", speedStats.under10,
+						"10-50KB/s", speedStats.under50,
+						"50-100KB/s", speedStats.under100,
+						"100-500KB/s", speedStats.under500,
+						"500-1000KB/s", speedStats.under1000,
+						">=1000KB/s", speedStats.over1000)
+				}
 				return
 			}
-			receivedCounter.Add(1)
 			processedCount++
 
-			speed, _, err := CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
+			speed, bytes, err := CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
 			if err != nil {
-				// slog.Info("测速失败", "proxy", item.ProxyMap["name"], "error", err)
+				failedCount++
+				if failedCount <= 3 {
+					slog.Warn("测速失败（采样）", "节点", item.ProxyMap["name"], "错误", err, "已失败", failedCount)
+				}
 				item.Client.Close()
 				tracker.CountSpeed(false)
 				continue
 			}
+			
+			// 统计速度区间
+			if speed < 10 {
+				speedStats.under10++
+			} else if speed < 50 {
+				speedStats.under50++
+			} else if speed < 100 {
+				speedStats.under100++
+			} else if speed < 500 {
+				speedStats.under500++
+			} else if speed < 1000 {
+				speedStats.under1000++
+			} else {
+				speedStats.over1000++
+			}
+			
 			if speed < config.GlobalConfig.MinSpeed {
-				// slog.Info("测速未达标", "proxy", item.ProxyMap["name"], "speed_kb", speed, "min_required", config.GlobalConfig.MinSpeed)
+				slowCount++
+				if slowCount <= 3 {
+					slog.Warn("测速未达标（采样）", "节点", item.ProxyMap["name"], "速度KB/s", speed, "最低要求", config.GlobalConfig.MinSpeed, "下载字节", bytes, "已过滤", slowCount)
+				}
 				item.Client.Close()
 				tracker.CountSpeed(false)
 				continue
@@ -182,7 +227,6 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 			if !ok {
 				return
 			}
-			receivedCounter.Add(1)
 			// Media checks
 			if config.GlobalConfig.MediaCheck {
 				for _, plat := range config.GlobalConfig.Platforms {
