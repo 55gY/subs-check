@@ -122,7 +122,7 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 	}
 }
 
-func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- PipelineItem, resOut chan<- Result, tracker *ProgressTracker, mediaON bool) {
+func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- PipelineItem, resOut chan<- Result, tracker *ProgressTracker, mediaON bool, receivedCounter *atomic.Int32) {
 	processedCount := 0
 	for {
 		select {
@@ -134,6 +134,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				// slog.Info("speedWorker接收到关闭信号", "已处理", processedCount)
 				return
 			}
+			receivedCounter.Add(1)
 			processedCount++
 
 			speed, _, err := CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
@@ -172,7 +173,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 	}
 }
 
-func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Result, tracker *ProgressTracker) {
+func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Result, tracker *ProgressTracker, receivedCounter *atomic.Int32) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -181,6 +182,7 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 			if !ok {
 				return
 			}
+			receivedCounter.Add(1)
 			// Media checks
 			if config.GlobalConfig.MediaCheck {
 				for _, plat := range config.GlobalConfig.Platforms {

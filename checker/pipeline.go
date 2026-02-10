@@ -177,6 +177,10 @@ func Check() ([]Result, error) {
 
 	var aliveWG, speedWG, mediaWG sync.WaitGroup
 
+	// 接收计数器（用于诊断发送/接收差异）
+	var speedReceivedCount atomic.Int32
+	var mediaReceivedCount atomic.Int32
+
 	// 计算并发数 (Adaptive Concurrency)
 	baseConcurrent := config.GlobalConfig.Concurrent
 	aliveConc := getConcurrency(len(proxies), baseConcurrent, 0.6)
@@ -270,21 +274,34 @@ func Check() ([]Result, error) {
 	slog.Info("等待存活检测完成...", "启动的workers", aliveConc)
 
 	// 计算合理的超时时间并设置到tracker
+	// 计算单节点实际超时时间
+	var singleNodeTimeMs int
+	if config.GlobalConfig.UnifiedDelay {
+		// unified-delay模式: warmup + test
+		singleNodeTimeMs = (config.GlobalConfig.WarmupTimeout + config.GlobalConfig.TestTimeout) * 1000
+	} else {
+		// 普通模式: 使用配置的超时
+		singleNodeTimeMs = config.GlobalConfig.Timeout
+	}
+	
 	// 基础时间 = (节点数 / 并发数 * 单节点超时) + 缓冲时间
-	baseTime := time.Duration(len(proxies)/aliveConc*config.GlobalConfig.Timeout)*time.Millisecond + 60*time.Second
+	baseTime := time.Duration(len(proxies)/aliveConc*singleNodeTimeMs)*time.Millisecond + 60*time.Second
 	// 乘以2倍安全系数，考虑网络波动和worker调度延迟
 	expectedTime := baseTime * 2
 	if expectedTime < 2*time.Minute {
 		expectedTime = 2 * time.Minute // 最少2分钟
 	}
-	if expectedTime > 10*time.Minute {
-		expectedTime = 10 * time.Minute // 最多10分钟
+	if expectedTime > 30*time.Minute {
+		expectedTime = 30 * time.Minute // 最多30分钟
 	}
 	tracker.SetTimeout(expectedTime)
-	slog.Info("设置存活检测超时", "预计时间", expectedTime.String(), "基础时间", baseTime.String())
+	slog.Info("设置存活检测超时", 
+		"预计时间", expectedTime.String(), 
+		"基础时间", baseTime.String(),
+		"单节点时间", fmt.Sprintf("%dms", singleNodeTimeMs))
 
 	// 添加超时保护，防止永久卡住
-	aliveWaitDone := make(chan bool)
+	aliveWaitDone := make(chan bool, 1)
 	go func() {
 		aliveWG.Wait()
 		aliveWaitDone <- true
@@ -328,7 +345,7 @@ func Check() ([]Result, error) {
 		speedWG.Add(1)
 		go func() {
 			defer speedWG.Done()
-			speedWorker(ctx, speedChan, mediaChan, resultChan, tracker, mediaON)
+			speedWorker(ctx, speedChan, mediaChan, resultChan, tracker, mediaON, &speedReceivedCount)
 		}()
 	}
 
@@ -342,27 +359,109 @@ func Check() ([]Result, error) {
 		mediaWG.Add(1)
 		go func() {
 			defer mediaWG.Done()
-			mediaWorker(ctx, mediaChan, resultChan, tracker)
+			mediaWorker(ctx, mediaChan, resultChan, tracker, &mediaReceivedCount)
 		}()
 	}
 
-	// 将存活节点送入测速流水线
+	// 记录发送计数
+	var speedSentCount atomic.Int32
+
+	// 将存活节点送入测速流水线（初始批次）
 	go func() {
-		slog.Info("开始批量发送存活节点到测速流水线", "节点数", len(aliveResults))
-		for _, item := range aliveResults {
+		// 加锁创建副本，避免竞态条件
+		aliveResultsMutex.Lock()
+		snapshot := make([]PipelineItem, len(aliveResults))
+		copy(snapshot, aliveResults)
+		aliveResultsMutex.Unlock()
+		
+		initialSent := len(snapshot)
+		speedSentCount.Store(int32(initialSent))
+		slog.Info("开始批量发送存活节点到测速流水线", "节点数", initialSent)
+		for _, item := range snapshot {
 			speedChan <- item
 		}
-		close(speedChan)
+		// 不关闭 speedChan，由持续收集goroutine负责关闭
+	}()
+
+	// 持续收集后台完成的节点（超时场景）
+	go func() {
+		lastSentCount := int(speedSentCount.Load())
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		
+		extraTimeout := time.After(5 * time.Minute)
+		
+		for {
+			select {
+			case <-aliveWaitDone:
+				// 存活检测全部完成，最后一次检查是否有新节点
+				aliveResultsMutex.Lock()
+				currentLen := len(aliveResults)
+				if currentLen > lastSentCount {
+					newNodes := make([]PipelineItem, currentLen-lastSentCount)
+					copy(newNodes, aliveResults[lastSentCount:])
+					aliveResultsMutex.Unlock()
+					
+					for _, item := range newNodes {
+						speedChan <- item
+					}
+					speedSentCount.Store(int32(currentLen))
+					slog.Info("从后台worker收到新节点", 
+						"数量", len(newNodes), 
+						"累计已发送", currentLen,
+						"总存活", tracker.aliveSuccess.Load())
+				} else {
+					aliveResultsMutex.Unlock()
+				}
+				close(speedChan)
+				return
+			case <-extraTimeout:
+				// 超时后额外等待5分钟已到
+				slog.Warn("超时后额外等待5分钟已到，停止收集后台节点",
+					"累计已发送", speedSentCount.Load(),
+					"总存活", tracker.aliveSuccess.Load())
+				close(speedChan)
+				return
+			case <-ticker.C:
+				// 定期检查是否有新节点
+				aliveResultsMutex.Lock()
+				currentLen := len(aliveResults)
+				if currentLen > lastSentCount {
+					newNodes := make([]PipelineItem, currentLen-lastSentCount)
+					copy(newNodes, aliveResults[lastSentCount:])
+					aliveResultsMutex.Unlock()
+					
+					for _, item := range newNodes {
+						speedChan <- item
+					}
+					speedSentCount.Store(int32(currentLen))
+					slog.Info("从后台worker收到新节点", 
+						"数量", len(newNodes), 
+						"累计已发送", currentLen,
+						"总存活", tracker.aliveSuccess.Load())
+					lastSentCount = currentLen
+				} else {
+					aliveResultsMutex.Unlock()
+				}
+			}
+		}
 	}()
 
 	// 级联关闭通道
 	go func() {
 		speedWG.Wait()
-		slog.Info("测速检测完成")
+		slog.Info("测速检测完成", 
+			"发送数", speedSentCount.Load(), 
+			"接收数", speedReceivedCount.Load())
 		close(mediaChan)
 	}()
 	go func() {
 		mediaWG.Wait()
+		if mediaON {
+			slog.Info("媒体检测完成", 
+				"发送数", speedReceivedCount.Load(), 
+				"接收数", mediaReceivedCount.Load())
+		}
 		close(resultChan)
 	}()
 

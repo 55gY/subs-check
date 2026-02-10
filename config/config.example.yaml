@@ -20,7 +20,19 @@ cron-expression: "0 */6 * * *"
 # 统一延迟模式：启用后会进行两次延迟测试，消除不同协议握手时间差异
 # 第一次测试用于预热连接（完成TLS握手等），第二次测试才测量实际延迟
 # 优点：更准确的延迟测量，减少因握手超时导致的误判
-# 缺点：测试时间增加约50-100%
+# 缺点：测试时间显著增加
+#
+# 时间影响说明：
+# 预计检测时间 ≈ 节点数/并发数 × 单节点时间 × 2（安全系数）
+# 单节点时间：
+#   - 未启用 unified-delay：约10秒（timeout配置值）
+#   - 已启用 unified-delay：约25秒（warmup-timeout + test-timeout）
+# 示例（1000节点，100并发）：
+#   - 未启用：1000/100 × 10秒 × 2 ≈ 3.3分钟
+#   - 已启用：1000/100 × 25秒 × 2 ≈ 8.3分钟
+#
+# 注意：系统会自动计算合理的超时时间，最大上限为30分钟
+# 支持大规模订阅（10万+节点）和 unified-delay 模式
 unified-delay: true
 # 预热阶段超时时间（秒），用于第一次测试建立连接
 warmup-timeout: 15
@@ -28,7 +40,8 @@ warmup-timeout: 15
 test-timeout: 10
 
 # 超时时间(毫秒)(节点的最大延迟)
-# 注意：如果启用 unified-delay，此配置将被 warmup-timeout 和 test-timeout 替代
+# 注意：如果启用 unified-delay，此配置仅用于非 unified-delay 场景
+# unified-delay 模式使用 warmup-timeout + test-timeout 计算总时间
 timeout: 10000
 # 延迟测试URL
 # 一些高级用法需要自己摸索，比如想要拒绝某些CF类节点，可将url替换为https://www.cloudflare.com
