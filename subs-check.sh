@@ -344,16 +344,47 @@ download_binary() {
     fi
     
     echo -e "${YELLOW}正在解压...${NC}"
-    tar -xzf "$tmp_file" -C "$SCRIPT_DIR"
+    
+    # 创建临时目录用于解压
+    local tmp_extract_dir="/tmp/subs-check-extract-$$"
+    mkdir -p "$tmp_extract_dir"
+    
+    # 解压到临时目录
+    tar -xzf "$tmp_file" -C "$tmp_extract_dir"
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}错误: 解压失败${NC}"
-        rm -f "$tmp_file"
+        rm -rf "$tmp_file" "$tmp_extract_dir"
         exit 1
     fi
     
-    rm -f "$tmp_file"
+    # 查找可执行文件（可能是 subs-check 或其他名称）
+    local binary_file=$(find "$tmp_extract_dir" -type f -executable 2>/dev/null | head -n 1)
+    
+    # 如果没找到可执行文件，尝试查找名称包含 subs-check 的文件
+    if [ -z "$binary_file" ]; then
+        binary_file=$(find "$tmp_extract_dir" -type f -name "*subs-check*" | head -n 1)
+    fi
+    
+    # 如果还是没找到，尝试查找任何文件（排除目录）
+    if [ -z "$binary_file" ]; then
+        binary_file=$(find "$tmp_extract_dir" -type f ! -name "*.md" ! -name "*.txt" ! -name "LICENSE" | head -n 1)
+    fi
+    
+    if [ -z "$binary_file" ] || [ ! -f "$binary_file" ]; then
+        echo -e "${RED}错误: 无法找到二进制文件${NC}"
+        echo -e "${YELLOW}压缩包内容:${NC}"
+        ls -la "$tmp_extract_dir"
+        rm -rf "$tmp_file" "$tmp_extract_dir"
+        exit 1
+    fi
+    
+    # 移动二进制文件到目标位置
+    mv "$binary_file" "$BINARY_PATH"
     chmod +x "$BINARY_PATH"
+    
+    # 清理临时文件
+    rm -rf "$tmp_file" "$tmp_extract_dir"
     
     echo -e "${GREEN}✓ 二进制文件安装成功${NC}"
 }
