@@ -406,14 +406,17 @@ get_default_branch() {
     local default_branch
     
     if command -v curl &> /dev/null; then
-        default_branch=$(curl -s "$api_url" | grep -o '"default_branch": *"[^"]*"' | sed 's/"default_branch": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+        default_branch=$(curl -s "$api_url" | grep -o '"default_branch": *"[^"]*"' | head -n 1 | sed 's/"default_branch": *"\([^"]*\)"/\1/')
     else
-        default_branch=$(wget -qO- "$api_url" | grep -o '"default_branch": *"[^"]*"' | sed 's/"default_branch": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+        default_branch=$(wget -qO- "$api_url" | grep -o '"default_branch": *"[^"]*"' | head -n 1 | sed 's/"default_branch": *"\([^"]*\)"/\1/')
     fi
     
-    # 如果获取失败，回退到 master
-    if [ -z "$default_branch" ]; then
-        default_branch="master"
+    # 清理可能的多余字符
+    default_branch=$(echo "$default_branch" | tr -d '\r\n\t ' | head -c 50)
+    
+    # 如果获取失败或为空，回退到 new
+    if [ -z "$default_branch" ] || [ ${#default_branch} -gt 30 ]; then
+        default_branch="new"
     fi
     
     echo "$default_branch"
