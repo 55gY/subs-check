@@ -449,9 +449,19 @@ download_config() {
         fi
         
         if [ $? -eq 0 ] && [ -f "$CONFIG_PATH" ] && [ -s "$CONFIG_PATH" ]; then
-            success=1
-            echo -e "${GREEN}✓ 配置文件下载成功${NC}"
-            break
+            # 验证文件是否为有效的 YAML（不是 HTML 错误页面）
+            if head -n 5 "$CONFIG_PATH" | grep -qiE '(<html|<!DOCTYPE|<head|<body)'; then
+                echo -e "${YELLOW}下载的文件是 HTML 页面，尝试下一个镜像...${NC}"
+                rm -f "$CONFIG_PATH"
+            elif head -n 1 "$CONFIG_PATH" | grep -q '^#\|^[a-zA-Z]'; then
+                # 检查文件开头是否像 YAML（注释或配置项）
+                success=1
+                echo -e "${GREEN}✓ 配置文件下载成功${NC}"
+                break
+            else
+                echo -e "${YELLOW}下载的文件格式不正确，尝试下一个镜像...${NC}"
+                rm -f "$CONFIG_PATH"
+            fi
         else
             echo -e "${YELLOW}下载失败，尝试下一个镜像...${NC}"
             rm -f "$CONFIG_PATH"
@@ -459,9 +469,27 @@ download_config() {
     done
     
     if [ $success -eq 0 ]; then
-        echo -e "${RED}错误: 配置文件下载失败${NC}"
-        echo -e "${YELLOW}请手动从以下地址下载: ${config_url}${NC}"
-        exit 1
+        echo -e "${YELLOW}所有镜像下载失败，尝试使用 GitHub API...${NC}"
+        
+        # 尝试通过 GitHub API 获取文件内容
+        local api_file_url="https://api.github.com/repos/${GITHUB_REPO}/contents/config/config.example.yaml?ref=${default_branch}"
+        
+        if command -v curl &> /dev/null; then
+            # 获取 base64 编码的内容并解码
+            curl -s "$api_file_url" | grep -o '"content": *"[^"]*"' | sed 's/"content": *"\([^"]*\)"/\1/' | tr -d '\n\r' | base64 -d > "$CONFIG_PATH" 2>/dev/null
+        else
+            wget -qO- "$api_file_url" | grep -o '"content": *"[^"]*"' | sed 's/"content": *"\([^"]*\)"/\1/' | tr -d '\n\r' | base64 -d > "$CONFIG_PATH" 2>/dev/null
+        fi
+        
+        # 验证 API 下载是否成功
+        if [ -f "$CONFIG_PATH" ] && [ -s "$CONFIG_PATH" ] && head -n 1 "$CONFIG_PATH" | grep -q '^#\|^[a-zA-Z]'; then
+            echo -e "${GREEN}✓ 通过 API 下载成功${NC}"
+        else
+            echo -e "${RED}错误: 配置文件下载失败${NC}"
+            echo -e "${YELLOW}请手动从以下地址下载: ${config_url}${NC}"
+            rm -f "$CONFIG_PATH"
+            exit 1
+        fi
     fi
     
     echo -e "${YELLOW}配置文件位置: ${CONFIG_PATH}${NC}"
