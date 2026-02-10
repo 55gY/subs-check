@@ -329,6 +329,9 @@ func Check() ([]Result, error) {
 	}
 
 	// ===== 第2-3阶段：测速+媒体流水线 =====
+	// 记录发送计数（需要在 goto 之前声明）
+	var speedSentCount atomic.Int32
+	
 	// 如果没有存活节点或者不需要测速和媒体，直接返回
 	if len(aliveResults) == 0 || (!speedON && !mediaON) {
 		close(resultChan)
@@ -362,9 +365,6 @@ func Check() ([]Result, error) {
 			mediaWorker(ctx, mediaChan, resultChan, tracker, &mediaReceivedCount)
 		}()
 	}
-
-	// 记录发送计数
-	var speedSentCount atomic.Int32
 
 	// 将存活节点送入测速流水线（初始批次）
 	go func() {
