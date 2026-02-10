@@ -401,7 +401,7 @@ func getConcurrency(total int, base int, ratio float64) int {
 	}
 
 	// 添加硬性上限保护，避免过高并发导致资源耗尽
-	const maxConcurrency = 100 // 最大并发数
+	const maxConcurrency = 300 // 最大并发数
 	if target > maxConcurrency {
 		target = maxConcurrency
 	}

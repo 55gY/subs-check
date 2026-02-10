@@ -148,9 +148,9 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 	}
 
 	var wg sync.WaitGroup
-	proxyChan := make(chan map[string]any, 1)                              // 缓冲通道存储解析的代理
-	concurrentLimit := make(chan struct{}, config.GlobalConfig.Concurrent) // 限制并发数
-	failedSubsChan := make(chan string, len(subUrls))                      // 收集失败的订阅链接
+	proxyChan := make(chan map[string]any, 1)   // 缓冲通道存储解析的代理
+	concurrentLimit := make(chan struct{}, 1000) // 订阅拉取固定使用1000并发，不受concurrent限制
+	failedSubsChan := make(chan string, len(subUrls)) // 收集失败的订阅链接
 	successSubsChan := make(chan string, len(subUrls))                     // 收集成功的订阅链接
 
 	// 订阅获取进度统计
