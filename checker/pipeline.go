@@ -348,6 +348,8 @@ func Check() ([]Result, error) {
 	var speedSentCount atomic.Int32
 	var speedConc, mediaConc int
 	var aliveCount int
+	var speedMediaCtx context.Context
+	var speedMediaCancel context.CancelFunc
 	
 	// 如果没有存活节点或者不需要测速和媒体，直接返回
 	if len(aliveResults) == 0 || (!speedON && !mediaON) {
@@ -386,7 +388,7 @@ func Check() ([]Result, error) {
 		"媒体并发", mediaConc)
 
 	// 为阶段2-3创建新的独立 context，与阶段1完全隔离
-	speedMediaCtx, speedMediaCancel := context.WithCancel(context.Background())
+	speedMediaCtx, speedMediaCancel = context.WithCancel(context.Background())
 	defer speedMediaCancel() // 确保函数退出时取消
 
 	// 启动 Speed Workers
