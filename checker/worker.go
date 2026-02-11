@@ -150,35 +150,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 
 			speed, _, err := CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
 			if err != nil {
-				failedCount++
 				item.Client.Close()
-				tracker.CountSpeed(false)
-				continue
-			}
-			
-			// 统计速度区间
-			if speed < 10 {
-				speedStats.under10++
-			} else if speed < 50 {
-				speedStats.under50++
-			} else if speed < 100 {
-				speedStats.under100++
-			} else if speed < 500 {
-				speedStats.under500++
-			} else if speed < 1000 {
-				speedStats.under1000++
-			} else {
-				speedStats.over1000++
-			}
-			
-			if speed < config.GlobalConfig.MinSpeed {
-				slowCount++
-				item.Client.Close()
-				tracker.CountSpeed(false)
-				continue
-			}
-
-			iitem.Client.Close()
 				tracker.CountSpeed(false)
 				continue
 			}
@@ -199,6 +171,27 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 			}
 			
 			if speed < config.GlobalConfig.MinSpeed {
+				item.Client.Close()
+				tracker.CountSpeed(false)
+				continue
+			}
+
+			item.Speed = speed
+			tracker.CountSpeed(true)
+
+			if mediaON {
+				receivedCounter.Add(1)
+				tracker.mediaDone.Add(1)
+				mediaOut <- item
+			} else {
+				if updateProxyName(item.Result, item.Client, speed) {
+					// 节点被过滤，关闭连接并跳过
+					item.Client.Close()
+					continue
+				}
+				Available.Add(1)
+				resOut <- *item.Result
+				item.Client.Close()
 			}
 		}
 	}
