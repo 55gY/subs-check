@@ -383,7 +383,9 @@ func Check() ([]Result, error) {
 	slog.Info("动态并发分配", 
 		"存活节点数", aliveCount,
 		"测速并发", speedConc, 
-		"媒为阶段2-3创建新的独立 context，与阶段1完全隔离
+		"媒体并发", mediaConc)
+
+	// 为阶段2-3创建新的独立 context，与阶段1完全隔离
 	speedMediaCtx, speedMediaCancel := context.WithCancel(context.Background())
 	defer speedMediaCancel() // 确保函数退出时取消
 
@@ -406,9 +408,7 @@ func Check() ([]Result, error) {
 			mediaWG.Add(1)
 			go func() {
 				defer mediaWG.Done()
-				mediaWorker(speedMediaC
-				defer mediaWG.Done()
-				mediaWorker(ctx, mediaChan, resultChan, tracker, &mediaReceivedCount)
+				mediaWorker(speedMediaCtx, mediaChan, resultChan, tracker, &mediaReceivedCount)
 			}()
 		}
 	}
