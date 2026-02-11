@@ -503,6 +503,13 @@ func Check() ([]Result, error) {
 			"发送数", speedSentCount.Load(), 
 			"处理数", tracker.speedDone.Load(),
 			"通过数", tracker.speedSuccess.Load())
+		slog.Info("测速统计", 
+			"<10KB/s", speedStatsUnder10.Load(),
+			"10-50KB/s", speedStatsUnder50.Load(),
+			"50-100KB/s", speedStatsUnder100.Load(),
+			"100-500KB/s", speedStatsUnder500.Load(),
+			"500-1000KB/s", speedStatsUnder1000.Load(),
+			">=1000KB/s", speedStatsOver1000.Load())
 		close(mediaChan)
 	}()
 	go func() {

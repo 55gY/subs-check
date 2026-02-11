@@ -19,6 +19,16 @@ import (
 	"github.com/metacubex/mihomo/constant"
 )
 
+// 全局测速统计（所有 speedWorker 共享）
+var (
+	speedStatsUnder10   atomic.Int32
+	speedStatsUnder50   atomic.Int32
+	speedStatsUnder100  atomic.Int32
+	speedStatsUnder500  atomic.Int32
+	speedStatsUnder1000 atomic.Int32
+	speedStatsOver1000  atomic.Int32
+)
+
 // aliveWorkerCollect 存活检测worker（收集模式）
 func aliveWorkerCollect(ctx context.Context, in <-chan PipelineItem, results *[]PipelineItem, mutex *sync.Mutex, tracker *ProgressTracker, speedON, mediaON bool) {
 	for {
@@ -129,42 +139,14 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 		}
 	}()
 
-	processedCount := 0
-	failedCount := 0
-	slowCount := 0
-	// 速度区间统计
-	speedStats := struct {
-		under10   int // <10 KB/s
-		under50   int // 10-50 KB/s
-		under100  int // 50-100 KB/s
-		under500  int // 100-500 KB/s
-		under1000 int // 500-1000 KB/s
-		over1000  int // >=1000 KB/s
-	}{}
-	
 	for {
 		select {
 		case <-ctx.Done():
-			// slog.Info("speedWorker退出", "已处理", processedCount)
 			return
 		case item, ok := <-in:
 			if !ok {
-				if processedCount > 0 {
-					slog.Info("speedWorker完成", 
-						"总处理", processedCount, 
-						"测速失败", failedCount, 
-						"速度过慢", slowCount)
-					slog.Info("测速统计", 
-						"<10KB/s", speedStats.under10,
-						"10-50KB/s", speedStats.under50,
-						"50-100KB/s", speedStats.under100,
-						"100-500KB/s", speedStats.under500,
-						"500-1000KB/s", speedStats.under1000,
-						">=1000KB/s", speedStats.over1000)
-				}
 				return
 			}
-			processedCount++
 
 			speed, _, err := CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
 			if err != nil {
@@ -196,29 +178,27 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				continue
 			}
 
-			item.Speed = speed
-			tracker.CountSpeed(true)
-			// slog.Info("测速通过", "proxy", item.ProxyMap["name"], "speed_kb", speed)
-
-			if mediaON {
-				// 预先增加媒体计数，避免节点在通道中时的计数盲区
-				tracker.mediaDone.Add(1)
-				mediaOut <- item
+			iitem.Client.Close()
+				tracker.CountSpeed(false)
+				continue
+			}
+			
+			// 统计速度区间 - 使用全局 atomic 计数器
+			if speed < 10 {
+				speedStatsUnder10.Add(1)
+			} else if speed < 50 {
+				speedStatsUnder50.Add(1)
+			} else if speed < 100 {
+				speedStatsUnder100.Add(1)
+			} else if speed < 500 {
+				speedStatsUnder500.Add(1)
+			} else if speed < 1000 {
+				speedStatsUnder1000.Add(1)
 			} else {
-				if updateProxyName(item.Result, item.Client, speed) {
-					// 节点被过滤，关闭连接并跳过
-					item.Client.Close()
-					continue
-				}
-				Available.Add(1)
-				resOut <- *item.Result
-				item.Client.Close()
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("mediaWorker发生panic", "错误", r)
-		}
-	}()
-
+				speedStatsOver1000.Add(1)
+			}
+			
+			if speed < config.GlobalConfig.MinSpeed {
 			}
 		}
 	}
@@ -305,7 +285,7 @@ func (c *statsConn) Read(b []byte) (n int, err error) {
 	n, err = c.Conn.Read(b)
 	atomic.AddUint64(c.bytesRead, uint64(n))
 
-	return n, err
+	re// 不调用 tracker.CountMedia()，因为已经在预先增加时计数了
 }
 
 // CreateClient creates and returns an http.Client with a Close function
