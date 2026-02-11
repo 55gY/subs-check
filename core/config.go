@@ -78,6 +78,26 @@ func (app *App) loadConfig() error {
 		"speed-test-url", config.GlobalConfig.SpeedTestUrl,
 		"min-speed", config.GlobalConfig.MinSpeed,
 		"alive-test-url", config.GlobalConfig.AliveTestUrl)
+
+	// 输出并发配置加载信息
+	if config.GlobalConfig.ConcurrentStage != nil {
+		slog.Info("并发配置加载",
+			"concurrent", config.GlobalConfig.Concurrent,
+			"concurrent-stage.alive", config.GlobalConfig.ConcurrentStage.Alive,
+			"concurrent-stage.speed", config.GlobalConfig.ConcurrentStage.Speed,
+			"concurrent-stage.media", config.GlobalConfig.ConcurrentStage.Media,
+			"生效-alive", config.GlobalConfig.GetAliveConcurrent(),
+			"生效-speed", config.GlobalConfig.GetSpeedConcurrent(),
+			"生效-media", config.GlobalConfig.GetMediaConcurrent())
+	} else {
+		slog.Info("并发配置加载",
+			"concurrent", config.GlobalConfig.Concurrent,
+			"concurrent-stage", "未配置(使用旧版配置)",
+			"生效-alive", config.GlobalConfig.GetAliveConcurrent(),
+			"生效-speed", config.GlobalConfig.GetSpeedConcurrent(),
+			"生效-media", config.GlobalConfig.GetMediaConcurrent())
+	}
+
 	return nil
 }
 

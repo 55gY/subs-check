@@ -181,6 +181,11 @@ func Check() ([]Result, error) {
 	var speedReceivedCount atomic.Int32
 	var mediaReceivedCount atomic.Int32
 
+	// 配置安全检查
+	if config.GlobalConfig == nil {
+		return nil, fmt.Errorf("配置未正确加载")
+	}
+
 	// 阶段1：存活检测 - 使用配置的存活检测并发数
 	aliveConc := config.GlobalConfig.GetAliveConcurrent()
 	if aliveConc > 300 {

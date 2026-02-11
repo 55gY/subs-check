@@ -123,6 +123,12 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 }
 
 func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- PipelineItem, resOut chan<- Result, tracker *ProgressTracker, mediaON bool, receivedCounter *atomic.Int32) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("speedWorker发生panic", "错误", r)
+		}
+	}()
+
 	processedCount := 0
 	failedCount := 0
 	slowCount := 0
@@ -213,6 +219,12 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				Available.Add(1)
 				resOut <- *item.Result
 				item.Client.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("mediaWorker发生panic", "错误", r)
+		}
+	}()
+
 			}
 		}
 	}
