@@ -278,7 +278,7 @@ func (c *statsConn) Read(b []byte) (n int, err error) {
 	n, err = c.Conn.Read(b)
 	atomic.AddUint64(c.bytesRead, uint64(n))
 
-	re// 不调用 tracker.CountMedia()，因为已经在预先增加时计数了
+	return n, err
 }
 
 // CreateClient creates and returns an http.Client with a Close function
