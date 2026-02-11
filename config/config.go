@@ -8,9 +8,17 @@ import (
 	"strings"
 )
 
+// ConcurrentConfig 分阶段并发配置
+type ConcurrentConfig struct {
+	Alive int `yaml:"alive"` // 存活检测并发数
+	Speed int `yaml:"speed"` // 测速检测并发数
+	Media int `yaml:"media"` // 媒体检测并发数
+}
+
 type Config struct {
 	PrintProgress        bool              `yaml:"print-progress"`
-	Concurrent           int               `yaml:"concurrent"`
+	Concurrent           int               `yaml:"concurrent"`           // 旧版配置，保持向后兼容
+	ConcurrentStage      *ConcurrentConfig `yaml:"concurrent-stage"`     // 新版分阶段配置
 	CheckInterval        int               `yaml:"check-interval"`
 	CronExpression       string            `yaml:"cron-expression"`
 	AliveTestUrl         string            `yaml:"alive-test-url"`
@@ -64,6 +72,50 @@ var GlobalConfig = &Config{
 	UnifiedDelay:  false, // 默认关闭，保持向后兼容
 	WarmupTimeout: 15,    // 预热超时 15 秒
 	TestTimeout:   10,    // 实际测试超时 10 秒
+}
+
+// GetAliveConcurrent 获取存活检测并发数
+func (c *Config) GetAliveConcurrent() int {
+	if c.ConcurrentStage != nil && c.ConcurrentStage.Alive > 0 {
+		return c.ConcurrentStage.Alive
+	}
+	// 向后兼容：使用旧配置
+	if c.Concurrent > 0 {
+		return c.Concurrent
+	}
+	return 100 // 默认值
+}
+
+// GetSpeedConcurrent 获取测速检测并发数
+func (c *Config) GetSpeedConcurrent() int {
+	if c.ConcurrentStage != nil && c.ConcurrentStage.Speed > 0 {
+		return c.ConcurrentStage.Speed
+	}
+	// 向后兼容：使用旧配置的 40%
+	if c.Concurrent > 0 {
+		conc := int(float64(c.Concurrent) * 0.4)
+		if conc < 1 {
+			conc = 1
+		}
+		return conc
+	}
+	return 40 // 默认值
+}
+
+// GetMediaConcurrent 获取媒体检测并发数
+func (c *Config) GetMediaConcurrent() int {
+	if c.ConcurrentStage != nil && c.ConcurrentStage.Media > 0 {
+		return c.ConcurrentStage.Media
+	}
+	// 向后兼容：使用旧配置的 20%
+	if c.Concurrent > 0 {
+		conc := int(float64(c.Concurrent) * 0.2)
+		if conc < 1 {
+			conc = 1
+		}
+		return conc
+	}
+	return 20 // 默认值
 }
 
 //go:embed config.example.yaml

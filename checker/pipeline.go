@@ -181,13 +181,17 @@ func Check() ([]Result, error) {
 	var speedReceivedCount atomic.Int32
 	var mediaReceivedCount atomic.Int32
 
-	// 计算并发数 (Adaptive Concurrency)
-	baseConcurrent := config.GlobalConfig.Concurrent
-	aliveConc := getConcurrency(len(proxies), baseConcurrent, 0.6)
-	speedConc := getConcurrency(len(proxies), baseConcurrent, 0.4)
-	mediaConc := getConcurrency(len(proxies), baseConcurrent, 0.2)
+	// 阶段1：存活检测 - 使用配置的存活检测并发数
+	aliveConc := config.GlobalConfig.GetAliveConcurrent()
+	if aliveConc > 300 {
+		aliveConc = 300 // 硬性上限
+	}
+	if aliveConc < 1 {
+		aliveConc = 1
+	}
 
-	slog.Info("启动检测流水线", "alive_workers", aliveConc, "speed_workers", speedConc, "media_workers", mediaConc)
+	slog.Info("======== 阶段1: 存活检测 ========")
+	slog.Info("启动存活检测", "总节点数", len(proxies), "并发数", aliveConc)
 	slog.Info("检测参数", "speed_enabled", speedON, "media_enabled", mediaON, "min_speed_kb", config.GlobalConfig.MinSpeed)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -312,7 +316,11 @@ func Check() ([]Result, error) {
 	case <-aliveWaitDone:
 		tracker.ClearTimeout() // 清除超时信息
 		progressDone <- true   // 停止进度报告
-		slog.Info("存活检测完成", "通过数量", tracker.aliveSuccess.Load(), "总节点数", len(proxies), "收集节点数", len(aliveResults))
+		slog.Info("======== 存活检测完成 ========")
+		slog.Info("存活统计", 
+			"总节点数", len(proxies), 
+			"通过数量", tracker.aliveSuccess.Load(), 
+			"存活率", fmt.Sprintf("%.2f%%", float64(tracker.aliveSuccess.Load())/float64(len(proxies))*100))
 	case <-timeout:
 		tracker.ClearTimeout() // 清除超时信息
 		progressDone <- true   // 停止进度报告
@@ -331,39 +339,66 @@ func Check() ([]Result, error) {
 	// ===== 第2-3阶段：测速+媒体流水线 =====
 	// 记录发送计数（需要在 goto 之前声明）
 	var speedSentCount atomic.Int32
+	var speedConc, mediaConc int
 	
 	// 如果没有存活节点或者不需要测速和媒体，直接返回
 	if len(aliveResults) == 0 || (!speedON && !mediaON) {
+		if len(aliveResults) == 0 {
+			slog.Warn("没有存活节点，跳过测速和媒体检测")
+		}
 		close(resultChan)
 		goto collectResults
 	}
 
+	// 阶段2-3：根据配置获取测速和媒体并发数
+	speedConc = config.GlobalConfig.GetSpeedConcurrent()
+	mediaConc = config.GlobalConfig.GetMediaConcurrent()
+	
+	// 上限保护
+	if speedConc > 300 {
+		speedConc = 300
+	}
+	if mediaConc > 300 {
+		mediaConc = 300
+	}
+	
+	// 根据实际节点数优化：如果存活节点很少，减少并发避免浪费
+	aliveCount := len(aliveResults)
+	if speedON && aliveCount < speedConc {
+		speedConc = aliveCount
+		if speedConc < 1 {
+			speedConc = 1
+		}
+	}
+	
+	slog.Info("======== 阶段2-3: 测速+媒体检测 ========")
+	slog.Info("动态并发分配", 
+		"存活节点数", aliveCount,
+		"测速并发", speedConc, 
+		"媒体并发", mediaConc)
+
 	// 启动 Speed Workers
 	if speedON {
-		slog.Info("切换到测速检测阶段")
 		tracker.SetStage(1, "测速检测")
-	}
-	slog.Info("启动测速workers", "数量", speedConc)
-	for i := 0; i < speedConc; i++ {
-		speedWG.Add(1)
-		go func() {
-			defer speedWG.Done()
-			speedWorker(ctx, speedChan, mediaChan, resultChan, tracker, mediaON, &speedReceivedCount)
-		}()
+		for i := 0; i < speedConc; i++ {
+			speedWG.Add(1)
+			go func() {
+				defer speedWG.Done()
+				speedWorker(ctx, speedChan, mediaChan, resultChan, tracker, mediaON, &speedReceivedCount)
+			}()
+		}
 	}
 
 	// 启动 Media Workers
 	if mediaON {
-		slog.Info("切换到媒体检测阶段")
 		tracker.SetStage(2, "媒体检测")
-	}
-	slog.Info("启动媒体workers", "数量", mediaConc)
-	for i := 0; i < mediaConc; i++ {
-		mediaWG.Add(1)
-		go func() {
-			defer mediaWG.Done()
-			mediaWorker(ctx, mediaChan, resultChan, tracker, &mediaReceivedCount)
-		}()
+		for i := 0; i < mediaConc; i++ {
+			mediaWG.Add(1)
+			go func() {
+				defer mediaWG.Done()
+				mediaWorker(ctx, mediaChan, resultChan, tracker, &mediaReceivedCount)
+			}()
+		}
 	}
 
 	// 将存活节点送入测速流水线（初始批次）
