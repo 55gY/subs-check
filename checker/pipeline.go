@@ -340,6 +340,7 @@ func Check() ([]Result, error) {
 	// 记录发送计数（需要在 goto 之前声明）
 	var speedSentCount atomic.Int32
 	var speedConc, mediaConc int
+	var aliveCount int
 	
 	// 如果没有存活节点或者不需要测速和媒体，直接返回
 	if len(aliveResults) == 0 || (!speedON && !mediaON) {
@@ -363,7 +364,7 @@ func Check() ([]Result, error) {
 	}
 	
 	// 根据实际节点数优化：如果存活节点很少，减少并发避免浪费
-	aliveCount := len(aliveResults)
+	aliveCount = len(aliveResults)
 	if speedON && aliveCount < speedConc {
 		speedConc = aliveCount
 		if speedConc < 1 {
