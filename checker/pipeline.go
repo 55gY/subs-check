@@ -199,8 +199,8 @@ func Check() ([]Result, error) {
 	slog.Info("启动存活检测", "总节点数", len(proxies), "并发数", aliveConc)
 	slog.Info("检测参数", "speed_enabled", speedON, "media_enabled", mediaON, "min_speed_kb", config.GlobalConfig.MinSpeed)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// 为阶段1创建独立的 context，确保资源隔离
+	aliveCtx, aliveCancel := context.WithCancel(context.Background())
 
 	// 设置初始阶段
 	tracker.SetStage(0, "存活检测")
@@ -211,7 +211,7 @@ func Check() ([]Result, error) {
 		aliveWG.Add(1)
 		go func() {
 			defer aliveWG.Done()
-			aliveWorkerCollect(ctx, aliveChan, &aliveResults, &aliveResultsMutex, tracker, speedON, mediaON)
+			aliveWorkerCollect(aliveCtx, aliveChan, &aliveResults, &aliveResultsMutex, tracker, speedON, mediaON)
 		}()
 	}
 
@@ -321,14 +321,17 @@ func Check() ([]Result, error) {
 	case <-aliveWaitDone:
 		tracker.ClearTimeout() // 清除超时信息
 		progressDone <- true   // 停止进度报告
+		aliveCancel()          // 取消阶段1的 context，确保所有 workers 退出
 		slog.Info("======== 存活检测完成 ========")
 		slog.Info("存活统计", 
 			"总节点数", len(proxies), 
 			"通过数量", tracker.aliveSuccess.Load(), 
 			"存活率", fmt.Sprintf("%.2f%%", float64(tracker.aliveSuccess.Load())/float64(len(proxies))*100))
+		slog.Info("活跃 goroutine 数", "数量", runtime.NumGoroutine())
 	case <-timeout:
 		tracker.ClearTimeout() // 清除超时信息
 		progressDone <- true   // 停止进度报告
+		aliveCancel()          // 强制取消阶段1的 context，停止所有 alive workers
 		未完成节点数 := len(proxies) - int(tracker.aliveDone.Load())
 		slog.Warn("存活检测超时！强制继续",
 			"已处理", tracker.aliveDone.Load(),
@@ -336,9 +339,8 @@ func Check() ([]Result, error) {
 			"总数", len(proxies),
 			"通过数量", tracker.aliveSuccess.Load(),
 			"收集节点数", len(aliveResults),
-			"说明", "未完成的节点可能正在处理中，将在后台继续运行直到超时")
-		// 注意：卡住的worker会在各自的HTTP超时后自动退出
-		// 不强制取消context，因为后续的测速和媒体检测还需要使用
+			"说明", "已取消阶段1的context，所有存活检测workers将停止")
+		slog.Info("活跃 goroutine 数", "数量", runtime.NumGoroutine())
 	}
 
 	// ===== 第2-3阶段：测速+媒体流水线 =====
@@ -381,7 +383,9 @@ func Check() ([]Result, error) {
 	slog.Info("动态并发分配", 
 		"存活节点数", aliveCount,
 		"测速并发", speedConc, 
-		"媒体并发", mediaConc)
+		"媒为阶段2-3创建新的独立 context，与阶段1完全隔离
+	speedMediaCtx, speedMediaCancel := context.WithCancel(context.Background())
+	defer speedMediaCancel() // 确保函数退出时取消
 
 	// 启动 Speed Workers
 	if speedON {
@@ -390,7 +394,7 @@ func Check() ([]Result, error) {
 			speedWG.Add(1)
 			go func() {
 				defer speedWG.Done()
-				speedWorker(ctx, speedChan, mediaChan, resultChan, tracker, mediaON, &speedReceivedCount)
+				speedWorker(speedMediaCtx, speedChan, mediaChan, resultChan, tracker, mediaON, &speedReceivedCount)
 			}()
 		}
 	}
@@ -401,6 +405,8 @@ func Check() ([]Result, error) {
 		for i := 0; i < mediaConc; i++ {
 			mediaWG.Add(1)
 			go func() {
+				defer mediaWG.Done()
+				mediaWorker(speedMediaC
 				defer mediaWG.Done()
 				mediaWorker(ctx, mediaChan, resultChan, tracker, &mediaReceivedCount)
 			}()
