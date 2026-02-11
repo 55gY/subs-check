@@ -166,7 +166,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 			}
 			processedCount++
 
-			speed, bytes, err := CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
+			speed, _, err := CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
 			if err != nil {
 				failedCount++
 				item.Client.Close()
