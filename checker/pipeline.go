@@ -166,9 +166,15 @@ func Check() ([]Result, error) {
 	}
 
 	// 6. 启动 Pipeline
-	aliveChan := make(chan PipelineItem, config.GlobalConfig.Concurrent)
-	speedChan := make(chan PipelineItem, config.GlobalConfig.Concurrent)
-	mediaChan := make(chan PipelineItem, config.GlobalConfig.Concurrent)
+	// 阶段通道容量使用各阶段实际并发数，避免继续依赖旧版 concurrent 配置。
+	aliveChanCap := config.GlobalConfig.GetAliveConcurrent()
+	if aliveChanCap > 300 {
+		aliveChanCap = 300
+	}
+	if aliveChanCap < 1 {
+		aliveChanCap = 1
+	}
+	aliveChan := make(chan PipelineItem, aliveChanCap)
 	resultChan := make(chan Result, len(proxies))
 
 	// 存活检测结果收集
@@ -350,6 +356,8 @@ func Check() ([]Result, error) {
 	var aliveCount int
 	var speedMediaCtx context.Context
 	var speedMediaCancel context.CancelFunc
+	var speedChan chan PipelineItem
+	var mediaChan chan PipelineItem
 	
 	// 如果没有存活节点或者不需要测速和媒体，直接返回
 	if len(aliveResults) == 0 || (!speedON && !mediaON) {
@@ -371,6 +379,30 @@ func Check() ([]Result, error) {
 	if mediaConc > 300 {
 		mediaConc = 300
 	}
+
+	// 在不限总带宽的情况下，测速阶段容易因下载堆积放大资源压力。
+	// 使用更保守的保护上限，避免阶段2出现极端拥塞和连接堆积。
+	if speedON && config.GlobalConfig.TotalSpeedLimit == 0 {
+		safeCap := 64
+		if config.GlobalConfig.MinSpeed > 0 {
+			// min-speed 单位为 KB/s；按 1MB/s≈1024KB/s 的粗略下限估计，
+			// 将并发限制在一个更可控的范围内。
+			estimatedByMinSpeed := int((20 * 1024) / config.GlobalConfig.MinSpeed)
+			if estimatedByMinSpeed > 0 && estimatedByMinSpeed < safeCap {
+				safeCap = estimatedByMinSpeed * 2
+				if safeCap < 8 {
+					safeCap = 8
+				}
+			}
+		}
+		if speedConc > safeCap {
+			slog.Warn("未设置 total-speed-limit，已自动收紧测速并发",
+				"原测速并发", config.GlobalConfig.GetSpeedConcurrent(),
+				"调整后测速并发", safeCap,
+				"说明", "高并发测速会在低带宽或共享链路下造成下载堆积和资源峰值")
+			speedConc = safeCap
+		}
+	}
 	
 	// 根据实际节点数优化：如果存活节点很少，减少并发避免浪费
 	aliveCount = len(aliveResults)
@@ -386,6 +418,9 @@ func Check() ([]Result, error) {
 		"存活节点数", aliveCount,
 		"测速并发", speedConc, 
 		"媒体并发", mediaConc)
+
+	speedChan = make(chan PipelineItem, speedConc)
+	mediaChan = make(chan PipelineItem, mediaConc)
 
 	// 为阶段2-3创建新的独立 context，与阶段1完全隔离
 	speedMediaCtx, speedMediaCancel = context.WithCancel(context.Background())
@@ -415,83 +450,57 @@ func Check() ([]Result, error) {
 		}
 	}
 
-	// 将存活节点送入测速流水线（初始批次）
+	// 将存活节点送入测速流水线。
+	// 仅保留一个发送者，避免 close(speedChan) 与多个发送协程并发时出现 send on closed channel。
 	go func() {
-		// 加锁创建副本，避免竞态条件
-		aliveResultsMutex.Lock()
-		snapshot := make([]PipelineItem, len(aliveResults))
-		copy(snapshot, aliveResults)
-		aliveResultsMutex.Unlock()
-		
-		initialSent := len(snapshot)
-		speedSentCount.Store(int32(initialSent))
-		slog.Info("开始批量发送存活节点到测速流水线", "节点数", initialSent)
-		for _, item := range snapshot {
-			speedChan <- item
-		}
-		// 不关闭 speedChan，由持续收集goroutine负责关闭
-	}()
-
-	// 持续收集后台完成的节点（超时场景）
-	go func() {
-		lastSentCount := int(speedSentCount.Load())
+		lastSentCount := 0
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 		
 		extraTimeout := time.After(5 * time.Minute)
+		sendNewNodes := func() bool {
+			aliveResultsMutex.Lock()
+			currentLen := len(aliveResults)
+			if currentLen <= lastSentCount {
+				aliveResultsMutex.Unlock()
+				return false
+			}
+
+			newNodes := make([]PipelineItem, currentLen-lastSentCount)
+			copy(newNodes, aliveResults[lastSentCount:])
+			aliveResultsMutex.Unlock()
+
+			for _, item := range newNodes {
+				speedChan <- item
+			}
+			lastSentCount = currentLen
+			speedSentCount.Store(int32(currentLen))
+			slog.Info("发送存活节点到测速流水线",
+				"本次数量", len(newNodes),
+				"累计已发送", currentLen,
+				"总存活", tracker.aliveSuccess.Load())
+			return true
+		}
+
+		sendNewNodes()
 		
 		for {
 			select {
 			case <-aliveWaitDone:
-				// 存活检测全部完成，最后一次检查是否有新节点
-				aliveResultsMutex.Lock()
-				currentLen := len(aliveResults)
-				if currentLen > lastSentCount {
-					newNodes := make([]PipelineItem, currentLen-lastSentCount)
-					copy(newNodes, aliveResults[lastSentCount:])
-					aliveResultsMutex.Unlock()
-					
-					for _, item := range newNodes {
-						speedChan <- item
-					}
-					speedSentCount.Store(int32(currentLen))
-					slog.Info("从后台worker收到新节点", 
-						"数量", len(newNodes), 
-						"累计已发送", currentLen,
-						"总存活", tracker.aliveSuccess.Load())
-				} else {
-					aliveResultsMutex.Unlock()
-				}
+				// 存活检测全部完成，最后一次发送剩余节点后再关闭通道。
+				sendNewNodes()
 				close(speedChan)
 				return
 			case <-extraTimeout:
 				// 超时后额外等待5分钟已到
+				sendNewNodes()
 				slog.Warn("超时后额外等待5分钟已到，停止收集后台节点",
 					"累计已发送", speedSentCount.Load(),
 					"总存活", tracker.aliveSuccess.Load())
 				close(speedChan)
 				return
 			case <-ticker.C:
-				// 定期检查是否有新节点
-				aliveResultsMutex.Lock()
-				currentLen := len(aliveResults)
-				if currentLen > lastSentCount {
-					newNodes := make([]PipelineItem, currentLen-lastSentCount)
-					copy(newNodes, aliveResults[lastSentCount:])
-					aliveResultsMutex.Unlock()
-					
-					for _, item := range newNodes {
-						speedChan <- item
-					}
-					speedSentCount.Store(int32(currentLen))
-					slog.Info("从后台worker收到新节点", 
-						"数量", len(newNodes), 
-						"累计已发送", currentLen,
-						"总存活", tracker.aliveSuccess.Load())
-					lastSentCount = currentLen
-				} else {
-					aliveResultsMutex.Unlock()
-				}
+				sendNewNodes()
 			}
 		}
 	}()

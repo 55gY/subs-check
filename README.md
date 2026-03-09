@@ -133,6 +133,10 @@ print-progress: true
 # 并发线程数（根据CPU核心数和网络带宽调整）
 concurrent: 20
 
+# 服务器测速可用带宽峰值（MB/s）
+# 当未设置 concurrent-stage.speed 时，可基于该值自动推导测速并发
+network: 20
+
 # 定时检测间隔（分钟）
 check-interval: 120
 
@@ -164,6 +168,26 @@ download-mb: 20
 # 总下载速度限制（MB/s，0 表示不限）
 total-speed-limit: 0
 ```
+
+**测速并发建议：**
+
+- 当使用 `concurrent-stage.speed` 时，测速 worker 数量会以该配置为准
+- 当未设置 `concurrent-stage.speed` 且配置了 `network` 时，程序会按带宽峰值自动推导测速并发
+- 阶段通道容量也会按分阶段并发创建，不再依赖旧版 `concurrent`
+- 如果 `total-speed-limit: 0`，程序会自动对测速并发做保护性收紧，避免在低带宽或共享链路下出现下载堆积、连接暴涨和阶段2崩溃
+- 对于约 `20MB/s` 的链路，建议将 `concurrent-stage.speed` 控制在 `8-32` 区间内，再根据测速文件质量和节点速度逐步调整
+
+**测速并发优先级：**
+
+1. `concurrent-stage.speed`
+2. `network`
+3. 旧版 `concurrent` 推导
+4. 内置默认值
+
+## [2026-03-09] 变更说明
+- **调整内容**: 修复阶段2测速通道关闭竞态，避免 `speedChan` 在发送过程中被提前关闭；同时为不限总带宽场景增加测速并发保护，并支持通过 `network` 自动推导测速并发
+- **影响范围**: `checker/pipeline.go` 的阶段2-3流水线调度、`config/config.go` 的测速并发计算，以及 `README.md` / `config/config.example.yaml` 中的配置说明
+- **注意事项**: 若链路带宽有限但测速并发过高，仍会导致测速结果失真；建议优先配置 `network` 或显式设置 `concurrent-stage.speed`，并结合 `total-speed-limit` 一起使用
 
 ### Web 服务配置
 

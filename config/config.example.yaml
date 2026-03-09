@@ -5,8 +5,13 @@ print-progress: true
 # 新版：分阶段独立控制（推荐）
 concurrent-stage:
   alive: 300  # 存活检测并发数，处理全量节点，建议设置较高
-  speed: 100  # 测速检测并发数，只处理存活节点
+  # speed: 100  # 测速检测并发数，只处理存活节点；若未设置，可由 network 自动推导
   media: 50   # 媒体检测并发数，只处理测速通过的节点
+
+# 服务器测速可用带宽峰值（MB/s）
+# 当未设置 concurrent-stage.speed 时，程序会基于该值和 min-speed 自动推导测速并发
+# 例如：20 表示约 20MB/s 的链路峰值
+network: 20
 
 # 旧版：统一并发配置（保持向后兼容）
 # 如果设置了 concurrent-stage，此项将被忽略

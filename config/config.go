@@ -19,6 +19,7 @@ type Config struct {
 	PrintProgress        bool              `yaml:"print-progress"`
 	Concurrent           int               `yaml:"concurrent"`           // 旧版配置，保持向后兼容
 	ConcurrentStage      *ConcurrentConfig `yaml:"concurrent-stage"`     // 新版分阶段配置
+	Network              int               `yaml:"network"`              // 服务器带宽峰值(MB/s)，用于推导测速并发
 	CheckInterval        int               `yaml:"check-interval"`
 	CronExpression       string            `yaml:"cron-expression"`
 	AliveTestUrl         string            `yaml:"alive-test-url"`
@@ -90,6 +91,36 @@ func (c *Config) GetAliveConcurrent() int {
 func (c *Config) GetSpeedConcurrent() int {
 	if c.ConcurrentStage != nil && c.ConcurrentStage.Speed > 0 {
 		return c.ConcurrentStage.Speed
+	}
+	// 优先使用带宽峰值自动推导测速并发
+	if c.Network > 0 {
+		// network 单位为 MB/s，min-speed 单位为 KB/s。
+		// 采用“总带宽 / 最低有效测速”的近似值，再乘以 2 倍安全系数，
+		// 兼顾慢节点并发和测速结果稳定性。
+		if c.MinSpeed > 0 {
+			conc := (c.Network * 1024) / c.MinSpeed
+			if conc < 1 {
+				conc = 1
+			}
+			conc *= 2
+			if conc < 8 {
+				conc = 8
+			}
+			if conc > 64 {
+				conc = 64
+			}
+			return conc
+		}
+
+		// 未配置 min-speed 时，按每个测速任务至少分配约 1MB/s 估算。
+		conc := c.Network
+		if conc < 1 {
+			conc = 1
+		}
+		if conc > 64 {
+			conc = 64
+		}
+		return conc
 	}
 	// 向后兼容：使用旧配置的 40%
 	if c.Concurrent > 0 {
