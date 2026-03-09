@@ -10,8 +10,12 @@ import (
 )
 
 // CheckAlive 原有的单次存活检测
-func CheckAlive(httpClient *http.Client) (bool, error) {
-	resp, err := httpClient.Get(config.GlobalConfig.AliveTestUrl)
+func CheckAlive(ctx context.Context, httpClient *http.Client) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", config.GlobalConfig.AliveTestUrl, nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return false, err
 	}
@@ -25,13 +29,13 @@ func CheckAlive(httpClient *http.Client) (bool, error) {
 
 // CheckAliveWithWarmup 带预热的存活检测（统一延迟模式）
 // 通过两次测试消除握手时间差异，返回更准确的延迟测量
-func CheckAliveWithWarmup(httpClient *http.Client) (bool, int, error) {
+func CheckAliveWithWarmup(ctx context.Context, httpClient *http.Client) (bool, int, error) {
 	cfg := config.GlobalConfig
 	
 	// 如果未启用统一延迟，使用原有逻辑
 	if !cfg.UnifiedDelay {
 		start := time.Now()
-		alive, err := CheckAlive(httpClient)
+		alive, err := CheckAlive(ctx, httpClient)
 		latency := int(time.Since(start).Milliseconds())
 		return alive, latency, err
 	}
@@ -42,7 +46,7 @@ func CheckAliveWithWarmup(httpClient *http.Client) (bool, int, error) {
 		warmupTimeout = 15 * time.Second // 默认15秒
 	}
 	
-	ctx1, cancel1 := context.WithTimeout(context.Background(), warmupTimeout)
+	ctx1, cancel1 := context.WithTimeout(ctx, warmupTimeout)
 	defer cancel1()
 	
 	req1, err := http.NewRequestWithContext(ctx1, "GET", cfg.AliveTestUrl, nil)
@@ -63,7 +67,11 @@ func CheckAliveWithWarmup(httpClient *http.Client) (bool, int, error) {
 	}
 	
 	// 短暂间隔，让连接稳定
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-ctx.Done():
+		return false, 0, ctx.Err()
+	case <-time.After(50 * time.Millisecond):
+	}
 	
 	// 第二次测试：实际延迟测量
 	testTimeout := time.Duration(cfg.TestTimeout) * time.Second
@@ -71,7 +79,7 @@ func CheckAliveWithWarmup(httpClient *http.Client) (bool, int, error) {
 		testTimeout = 10 * time.Second // 默认10秒
 	}
 	
-	ctx2, cancel2 := context.WithTimeout(context.Background(), testTimeout)
+	ctx2, cancel2 := context.WithTimeout(ctx, testTimeout)
 	defer cancel2()
 	
 	req2, err := http.NewRequestWithContext(ctx2, "GET", cfg.AliveTestUrl, nil)

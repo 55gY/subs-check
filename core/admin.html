@@ -760,13 +760,20 @@
         });
         
         // 更新进度条
-        function updateProgressBar(total, processed, available, failed, stage, detailStats) {
-            // 计算检测进度百分比,保留一位小数
+        function updateProgressBar(total, processed, available, failed, stage, detailStats, progressPercentValue) {
             const percentTotal = total > 0 ? (processed / total * 100).toFixed(1) : 0;
+            const stageName = detailStats?.currentStageName || stage || '节点检测';
+            const stageDone = detailStats?.currentStageDone || 0;
+            const stageTotal = detailStats?.currentStageTotal || 0;
+            const overallPercent = typeof progressPercentValue === 'number' ? progressPercentValue.toFixed(1) : percentTotal;
             
             // 更新任务进度文本
             const progressText = document.getElementById('progressText');
-            progressText.textContent = `${processed}/${total}`;
+            if (stageTotal > 0) {
+                progressText.textContent = `${stageDone}/${stageTotal}`;
+            } else {
+                progressText.textContent = `${processed}/${total}`;
+            }
             
             // 更新成功数
             const successCount = document.getElementById('successCount');
@@ -800,21 +807,33 @@
             // 显示详细统计信息
             const detailStatsText = document.getElementById('detailStatsText');
             if (detailStats) {
-                let text = `总节点数=${detailStats.totalNodes}`;
+                let text = `当前阶段=${stageName} | 总进度=${overallPercent}%`;
                 
                 if (detailStats.aliveSuccess !== undefined && detailStats.aliveDone > 0) {
                     text += ` | 存活=${detailStats.aliveSuccess}`;
-                    
-                    // 添加阶段过渡提示：当存活检测完成但后续检测尚未开始时显示准备中状态
-                    if (detailStats.aliveDone === detailStats.totalNodes && detailStats.speedDone === 0 && stage !== '存活检测') {
-                        text += ` | 正在准备${stage}...`;
-                    }
                 }
                 if (detailStats.speedSuccess !== undefined && detailStats.speedDone > 0) {
                     text += ` | 测速通过=${detailStats.speedSuccess}`;
                 }
                 if (detailStats.mediaDone !== undefined && detailStats.mediaDone > 0) {
                     text += ` | 媒体检测=${detailStats.mediaDone}`;
+                }
+
+                if (detailStats.currentStageDone !== undefined) {
+                    if (detailStats.currentStageSuccess !== undefined && detailStats.currentStageSuccess > 0) {
+                        if (stageTotal > 0) {
+                            text += ` | 阶段进度=${detailStats.currentStageDone}/${stageTotal}`;
+                        } else {
+                            text += ` | 阶段进度=${detailStats.currentStageDone}`;
+                        }
+                        text += ` | 阶段成功=${detailStats.currentStageSuccess}`;
+                    } else {
+                        if (stageTotal > 0) {
+                            text += ` | 阶段进度=${detailStats.currentStageDone}/${stageTotal}`;
+                        } else {
+                            text += ` | 阶段进度=${detailStats.currentStageDone}`;
+                        }
+                    }
                 }
                 
                 // 显示超时倒计时
@@ -860,7 +879,7 @@
                         statusText.textContent = '正在检测中...';
                         
                         // 更新进度条 - 传递failed、stage和detailStats参数
-                        updateProgressBar(data.proxyCount, data.progress, data.available, data.failed, data.stage, data.detailStats);
+                        updateProgressBar(data.proxyCount, data.progress, data.available, data.failed, data.stage, data.detailStats, data.progressPercent);
                     } else {
                         statusContainer.className = 'text-success';
                         statusIcon.className = 'bi bi-check-circle me-1';
@@ -889,9 +908,10 @@
                 
                 // 显示N/A
                 document.getElementById('progressText').textContent = 'N/A';
+                document.getElementById('successCount').textContent = 'N/A';
+                document.getElementById('failedCount').textContent = 'N/A';
                 document.getElementById('progressPercent').textContent = 'N/A';
-                document.getElementById('processPercent').textContent = 'N/A';
-                document.getElementById('successText').textContent = 'N/A';
+                document.getElementById('detailStatsText').textContent = '';
                 document.getElementById('progressBarTotal').style.width = '0%';
                 document.getElementById('progressBarSuccess').style.width = '0%';
             });

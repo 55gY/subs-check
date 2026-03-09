@@ -472,9 +472,21 @@ func (app *App) getStatus(c *gin.Context) {
 	} else {
 		// 节点检测阶段:显示可用节点数
 		available = checker.Available.Load()
-		// 节点阶段的失败数 = 已处理 - 可用数
-		failed = int32(checker.Progress.Load()) - int32(available)
 		stage = "nodetest"
+		if checker.CurrentTracker != nil {
+			_, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone := checker.CurrentTracker.GetStats()
+			_ = mediaDone
+			failed = (aliveDone - aliveSuccess) + (speedDone - speedSuccess)
+			if failed < 0 {
+				failed = 0
+			}
+		} else {
+			// 回退逻辑：没有详细追踪器时保守使用总进度估算。
+			failed = int32(checker.Progress.Load()) - int32(available)
+			if failed < 0 {
+				failed = 0
+			}
+		}
 	}
 
 	response := gin.H{
@@ -482,6 +494,9 @@ func (app *App) getStatus(c *gin.Context) {
 		"proxyCount": checker.ProxyCount.Load(),
 		"available":  available,
 		"progress":   checker.Progress.Load(),
+		"progressPercent": func() float64 {
+			return float64(checker.Progress.Load()) / 100
+		}(),
 		"failed":     failed,
 		"stage":      stage,
 	}
@@ -489,6 +504,7 @@ func (app *App) getStatus(c *gin.Context) {
 	// 添加详细统计信息
 	if checker.CurrentTracker != nil {
 		totalNodes, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone := checker.CurrentTracker.GetStats()
+		currentStage, currentStageName, currentStageDone, currentStageSuccess, currentStageTotal := checker.CurrentTracker.GetStageInfo()
 		timeoutRemaining := checker.CurrentTracker.GetTimeoutRemaining()
 		response["detailStats"] = gin.H{
 			"totalNodes":       totalNodes,
@@ -497,6 +513,11 @@ func (app *App) getStatus(c *gin.Context) {
 			"speedSuccess":     speedSuccess,
 			"speedDone":        speedDone,
 			"mediaDone":        mediaDone,
+			"currentStage":     currentStage,
+			"currentStageName": currentStageName,
+			"currentStageDone": currentStageDone,
+			"currentStageSuccess": currentStageSuccess,
+			"currentStageTotal": currentStageTotal,
 			"timeoutRemaining": timeoutRemaining, // 超时倒计时（秒）
 		}
 	}

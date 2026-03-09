@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,11 +12,11 @@ import (
 
 // CheckYoutube 检测 YouTube Premium 区域
 // 在body中查找 INNERTUBE_CONTEXT_GL 并提取区域代码
-func CheckYoutube(httpClient *http.Client) (string, error) {
+func CheckYoutube(ctx context.Context, httpClient *http.Client) (string, error) {
 	re := regexp.MustCompile(`"INNERTUBE_CONTEXT_GL"\s*:\s*"([^"]+)"`)
 
 	// 创建请求
-	req, err := http.NewRequest("GET", "https://www.youtube.com/premium", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.youtube.com/premium", nil)
 	if err != nil {
 		return "", err
 	}
@@ -65,9 +66,9 @@ func CheckYoutube(httpClient *http.Client) (string, error) {
 }
 
 // CheckNetflix 检测 Netflix 可用性
-func CheckNetflix(httpClient *http.Client) (bool, error) {
+func CheckNetflix(ctx context.Context, httpClient *http.Client) (bool, error) {
 	// https://www.netflix.com/title/81280792
-	req, err := http.NewRequest("GET", "https://www.netflix.com/title/81280792", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.netflix.com/title/81280792", nil)
 	if err != nil {
 		return false, err
 	}
@@ -85,7 +86,7 @@ func CheckNetflix(httpClient *http.Client) (bool, error) {
 }
 
 // CheckDisney 检测 Disney+ 可用性
-func CheckDisney(httpClient *http.Client) (bool, error) {
+func CheckDisney(ctx context.Context, httpClient *http.Client) (bool, error) {
 	// 定义常量
 	const (
 		cookie    = "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&latitude=0&longitude=0&platform=browser&subject_token=DISNEYASSERTION&subject_token_type=urn%3Abamtech%3Aparams%3Aoauth%3Atoken-type%3Adevice"
@@ -95,7 +96,7 @@ func CheckDisney(httpClient *http.Client) (bool, error) {
 	)
 
 	// 第一步：获取 assertion token
-	req, err := http.NewRequest("POST", "https://disney.api.edge.bamgrid.com/devices", strings.NewReader(assertion))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://disney.api.edge.bamgrid.com/devices", strings.NewReader(assertion))
 	if err != nil {
 		return false, err
 	}
@@ -127,7 +128,7 @@ func CheckDisney(httpClient *http.Client) (bool, error) {
 
 	// 第二步：获取 access token
 	tokenData := strings.Replace(cookie, "DISNEYASSERTION", assertionToken, 1)
-	req, err = http.NewRequest("POST", "https://disney.api.edge.bamgrid.com/token", strings.NewReader(tokenData))
+	req, err = http.NewRequestWithContext(ctx, "POST", "https://disney.api.edge.bamgrid.com/token", strings.NewReader(tokenData))
 	if err != nil {
 		return false, err
 	}
@@ -164,7 +165,7 @@ func CheckDisney(httpClient *http.Client) (bool, error) {
 	// 第三步：检查区域
 	gqlQuery := fmt.Sprintf(`{"query":"mutation refreshToken($input: RefreshTokenInput!) {refreshToken(refreshToken: $input) {activeSession {sessionId}}}","variables":{"input":{"refreshToken":"%s"}}}`, refreshToken)
 
-	req, err = http.NewRequest("POST", "https://disney.api.edge.bamgrid.com/graph/v1/device/graphql", strings.NewReader(gqlQuery))
+	req, err = http.NewRequestWithContext(ctx, "POST", "https://disney.api.edge.bamgrid.com/graph/v1/device/graphql", strings.NewReader(gqlQuery))
 	if err != nil {
 		return false, err
 	}
@@ -210,8 +211,8 @@ func CheckDisney(httpClient *http.Client) (bool, error) {
 }
 
 // CheckTikTok 检测 TikTok 区域
-func CheckTikTok(httpClient *http.Client) (string, error) {
-	req, err := http.NewRequest("GET", "https://www.tiktok.com/", nil)
+func CheckTikTok(ctx context.Context, httpClient *http.Client) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.tiktok.com/", nil)
 	if err != nil {
 		return "", err
 	}

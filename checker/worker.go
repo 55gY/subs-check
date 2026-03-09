@@ -53,7 +53,7 @@ func aliveWorkerCollect(ctx context.Context, in <-chan PipelineItem, results *[]
 			item.Client = client
 			item.Result = &Result{Proxy: item.ProxyMap}
 
-			google, latency, err := CheckAliveWithWarmup(client.Client)
+			google, latency, err := CheckAliveWithWarmup(ctx, client.Client)
 			if err != nil || !google {
 				slog.Debug("存活检测失败（收集模式）", "proxy", item.ProxyMap["name"], "latency", latency, "error", err)
 				client.Close()
@@ -100,7 +100,7 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 			item.Client = client
 			item.Result = &Result{Proxy: item.ProxyMap}
 
-			google, latency, err := CheckAliveWithWarmup(client.Client)
+			google, latency, err := CheckAliveWithWarmup(ctx, client.Client)
 			if err != nil || !google {
 				slog.Debug("存活检测失败", "proxy", item.ProxyMap["name"], "latency", latency, "error", err)
 				client.Close()
@@ -111,28 +111,39 @@ func aliveWorker(ctx context.Context, in <-chan PipelineItem, speedOut, mediaOut
 			tracker.CountAlive(true)
 
 			if speedON {
-				// 预先增加测速计数，避免节点在通道中时的计数盲区
-				tracker.speedDone.Add(1)
-				speedOut <- item
+				select {
+				case <-ctx.Done():
+					client.Close()
+					return
+				case speedOut <- item:
+				}
 			} else if mediaON {
-				// 预先增加媒体计数，避免节点在通道中时的计数盲区
-				tracker.mediaDone.Add(1)
-				mediaOut <- item
+				select {
+				case <-ctx.Done():
+					client.Close()
+					return
+				case mediaOut <- item:
+				}
 			} else {
-				if updateProxyName(item.Result, client, 0) {
+				if updateProxyName(ctx, item.Result, client, 0) {
 					// 节点被过滤，关闭连接并跳过
 					client.Close()
 					continue
 				}
 				Available.Add(1)
-				resOut <- *item.Result
+				select {
+				case <-ctx.Done():
+					client.Close()
+					return
+				case resOut <- *item.Result:
+				}
 				client.Close()
 			}
 		}
 	}
 }
 
-func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- PipelineItem, resOut chan<- Result, tracker *ProgressTracker, mediaON bool, receivedCounter *atomic.Int32) {
+func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- PipelineItem, resOut chan<- Result, tracker *ProgressTracker, mediaON bool, _ *atomic.Int32) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("speedWorker发生panic", "错误", r)
@@ -148,7 +159,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				return
 			}
 
-			speed, _, err := CheckSpeed(item.Client.Client, Bucket, item.Client.BytesRead)
+			speed, _, err := CheckSpeed(ctx, item.Client.Client, Bucket, item.Client.BytesRead)
 			if err != nil {
 				item.Client.Close()
 				tracker.CountSpeed(false)
@@ -181,23 +192,32 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 
 			if mediaON {
 				receivedCounter.Add(1)
-				tracker.mediaDone.Add(1)
-				mediaOut <- item
+				select {
+				case <-ctx.Done():
+					item.Client.Close()
+					return
+				case mediaOut <- item:
+				}
 			} else {
-				if updateProxyName(item.Result, item.Client, speed) {
+				if updateProxyName(ctx, item.Result, item.Client, speed) {
 					// 节点被过滤，关闭连接并跳过
 					item.Client.Close()
 					continue
 				}
 				Available.Add(1)
-				resOut <- *item.Result
+				select {
+				case <-ctx.Done():
+					item.Client.Close()
+					return
+				case resOut <- *item.Result:
+				}
 				item.Client.Close()
 			}
 		}
 	}
 }
 
-func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Result, tracker *ProgressTracker, receivedCounter *atomic.Int32) {
+func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Result, tracker *ProgressTracker, _ *atomic.Int32) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -211,37 +231,37 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 				for _, plat := range config.GlobalConfig.Platforms {
 					switch plat {
 					case "openai":
-						cookiesOK, clientOK := CheckOpenAI(item.Client.Client)
+						cookiesOK, clientOK := CheckOpenAI(ctx, item.Client.Client)
 						if clientOK && cookiesOK {
 							item.Result.Openai = true
 						} else if cookiesOK || clientOK {
 							item.Result.OpenaiWeb = true
 						}
 					case "youtube":
-						if region, _ := CheckYoutube(item.Client.Client); region != "" {
+						if region, _ := CheckYoutube(ctx, item.Client.Client); region != "" {
 							item.Result.Youtube = region
 						}
 					case "netflix":
-						if ok, _ := CheckNetflix(item.Client.Client); ok {
+						if ok, _ := CheckNetflix(ctx, item.Client.Client); ok {
 							item.Result.Netflix = true
 						}
 					case "disney":
-						if ok, _ := CheckDisney(item.Client.Client); ok {
+						if ok, _ := CheckDisney(ctx, item.Client.Client); ok {
 							item.Result.Disney = true
 						}
 					case "gemini":
-						if ok, _ := CheckGemini(item.Client.Client); ok {
+						if ok, _ := CheckGemini(ctx, item.Client.Client); ok {
 							item.Result.Gemini = true
 						}
 					case "iprisk":
-						country, ip, fraudScore := proxyutils.GetProxyCountry(item.Client.Client)
+						country, ip, fraudScore := proxyutils.GetProxyCountry(ctx, item.Client.Client)
 						if ip != "" {
 							item.Result.IP = ip
 							item.Result.Country = country
 							item.Result.IPRisk = proxyutils.GetFraudScoreLabel(fraudScore)
 						}
 					case "tiktok":
-						if region, _ := CheckTikTok(item.Client.Client); region != "" {
+						if region, _ := CheckTikTok(ctx, item.Client.Client); region != "" {
 							item.Result.TikTok = region
 						}
 					}
@@ -249,14 +269,19 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 			}
 
 			tracker.CountMedia()
-			if updateProxyName(item.Result, item.Client, item.Speed) {
+			if updateProxyName(ctx, item.Result, item.Client, item.Speed) {
 				// 节点被过滤，关闭连接并跳过
 				item.Client.Close()
 				continue
 			}
 
 			Available.Add(1)
-			resOut <- *item.Result
+			select {
+			case <-ctx.Done():
+				item.Client.Close()
+				return
+			case resOut <- *item.Result:
+			}
 			item.Client.Close()
 		}
 	}

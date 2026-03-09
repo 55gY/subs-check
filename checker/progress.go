@@ -169,17 +169,8 @@ func (pt *ProgressTracker) refresh() {
 		currentProgress = 100
 	}
 
-	// 更新全局原子变量，供 showProgress 读取
-	// Progress 存储的是百分比 * 100 (即 0-10000，如果需要更高精度)
-	// 但原代码 showProgress 似乎是用 current / total * 100
-	// 这里我们需要适配原有的 showProgress 或者重写它
-	// 假设我们重写 showProgress 来直接读取 Progress 作为百分比
-	// 或者我们这里反向计算出一个虚拟的 "current" 值
-
-	virtualCurrent := int32(currentProgress / 100.0 * total)
-	Progress.Store(uint32(virtualCurrent))
-
-	// 也可以直接存储百分比，修改 check.go 中的 showProgress
+	// Progress 直接存储整体加权进度百分比（放大100倍，保留两位小数）
+	Progress.Store(uint32(currentProgress * 100))
 }
 
 // SetStage 设置当前阶段
@@ -216,7 +207,7 @@ func (pt *ProgressTracker) ClearTimeout() {
 }
 
 // GetStageInfo 获取当前阶段信息
-func (pt *ProgressTracker) GetStageInfo() (stage int32, name string, done, success int32) {
+func (pt *ProgressTracker) GetStageInfo() (stage int32, name string, done, success, total int32) {
 	stage = pt.currentStage.Load()
 	if v := pt.stageName.Load(); v != nil {
 		name = v.(string)
@@ -226,12 +217,15 @@ func (pt *ProgressTracker) GetStageInfo() (stage int32, name string, done, succe
 	case 0: // 存活检测
 		done = pt.aliveDone.Load()
 		success = pt.aliveSuccess.Load()
+		total = pt.totalJobs.Load()
 	case 1: // 测速
 		done = pt.speedDone.Load()
 		success = pt.speedSuccess.Load()
+		total = pt.aliveSuccess.Load()
 	case 2: // 媒体检测
 		done = pt.mediaDone.Load()
-		success = 0 // 媒体检测不区分成功失败
+		success = pt.mediaDone.Load() // 媒体检测不区分成功失败，完成即视为成功
+		total = pt.speedSuccess.Load()
 	}
 	return
 }

@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -10,13 +11,13 @@ import (
 // 1.如果全部通过，ChatGPT客户端可正常使用，res.Openai = true，tag为"GPT⁺"
 // 2.如果只通过cookies检测 或 client检测，res.OpenaiWeb = true，tag为"GPT"
 // 经在Windows和ios客户端测试，如果仅通过一项检测，客户端很大概率不能使用，但web端很大概率可以使用。所以如果全部通过添加了一个角标"⁺",保留仅通过一项检测的tag为"GPT",web端用户几乎不需要发现标签变化。
-func CheckOpenAI(httpClient *http.Client) (bool, bool) {
-	return CheckCookies(httpClient), CheckClient(httpClient)
+func CheckOpenAI(ctx context.Context, httpClient *http.Client) (bool, bool) {
+	return CheckCookies(ctx, httpClient), CheckClient(ctx, httpClient)
 }
 
 // CheckCookies 通过检查cookies判断网络访问
-func CheckCookies(httpClient *http.Client) bool {
-	req, err := http.NewRequest("GET", "https://api.openai.com/compliance/cookie_requirements", nil)
+func CheckCookies(ctx context.Context, httpClient *http.Client) bool {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.openai.com/compliance/cookie_requirements", nil)
 	if err != nil {
 		return false
 	}
@@ -40,8 +41,8 @@ func CheckCookies(httpClient *http.Client) bool {
 }
 
 // CheckClient 通过模拟客户端访问检查app可用性
-func CheckClient(httpClient *http.Client) bool {
-	req, err := http.NewRequest("GET", "https://ios.chat.openai.com", nil)
+func CheckClient(ctx context.Context, httpClient *http.Client) bool {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://ios.chat.openai.com", nil)
 	if err != nil {
 		return false
 	}
@@ -78,8 +79,8 @@ func CheckClient(httpClient *http.Client) bool {
 
 // CheckGemini 检测 Gemini 可用性
 // https://github.com/clash-verge-rev/clash-verge-rev/blob/c894a15d13d5bcce518f8412cc393b56272a9afa/src-tauri/src/cmd/media_unlock_checker.rs#L241
-func CheckGemini(httpClient *http.Client) (bool, error) {
-	req, err := http.NewRequest("GET", "https://gemini.google.com/", nil)
+func CheckGemini(ctx context.Context, httpClient *http.Client) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://gemini.google.com/", nil)
 	if err != nil {
 		return false, err
 	}

@@ -384,10 +384,14 @@ func Check() ([]Result, error) {
 	// 使用更保守的保护上限，避免阶段2出现极端拥塞和连接堆积。
 	if speedON && config.GlobalConfig.TotalSpeedLimit == 0 {
 		safeCap := 64
+		networkKB := config.GlobalConfig.Network * 1024
+		if networkKB <= 0 {
+			networkKB = 20 * 1024
+		}
 		if config.GlobalConfig.MinSpeed > 0 {
 			// min-speed 单位为 KB/s；按 1MB/s≈1024KB/s 的粗略下限估计，
 			// 将并发限制在一个更可控的范围内。
-			estimatedByMinSpeed := int((20 * 1024) / config.GlobalConfig.MinSpeed)
+			estimatedByMinSpeed := networkKB / config.GlobalConfig.MinSpeed
 			if estimatedByMinSpeed > 0 && estimatedByMinSpeed < safeCap {
 				safeCap = estimatedByMinSpeed * 2
 				if safeCap < 8 {
@@ -399,6 +403,7 @@ func Check() ([]Result, error) {
 			slog.Warn("未设置 total-speed-limit，已自动收紧测速并发",
 				"原测速并发", config.GlobalConfig.GetSpeedConcurrent(),
 				"调整后测速并发", safeCap,
+				"参考带宽(MB/s)", networkKB/1024,
 				"说明", "高并发测速会在低带宽或共享链路下造成下载堆积和资源峰值")
 			speedConc = safeCap
 		}
@@ -440,7 +445,6 @@ func Check() ([]Result, error) {
 
 	// 启动 Media Workers
 	if mediaON {
-		tracker.SetStage(2, "媒体检测")
 		for i := 0; i < mediaConc; i++ {
 			mediaWG.Add(1)
 			go func() {
@@ -451,7 +455,7 @@ func Check() ([]Result, error) {
 	}
 
 	// 将存活节点送入测速流水线。
-	// 仅保留一个发送者，避免 close(speedChan) 与多个发送协程并发时出现 send on closed channel。
+	// 仅保留一个发送者，避免 close(channel) 与多个发送协程并发时出现 send on closed channel。
 	go func() {
 		lastSentCount := 0
 		ticker := time.NewTicker(1 * time.Second)
@@ -471,11 +475,20 @@ func Check() ([]Result, error) {
 			aliveResultsMutex.Unlock()
 
 			for _, item := range newNodes {
-				speedChan <- item
+				if speedON {
+					speedChan <- item
+				} else if mediaON {
+					mediaChan <- item
+				}
 			}
 			lastSentCount = currentLen
 			speedSentCount.Store(int32(currentLen))
-			slog.Info("发送存活节点到测速流水线",
+			targetStage := "测速"
+			if !speedON && mediaON {
+				targetStage = "媒体"
+			}
+			slog.Info("发送存活节点到后续流水线",
+				"目标阶段", targetStage,
 				"本次数量", len(newNodes),
 				"累计已发送", currentLen,
 				"总存活", tracker.aliveSuccess.Load())
@@ -487,9 +500,13 @@ func Check() ([]Result, error) {
 		for {
 			select {
 			case <-aliveWaitDone:
-				// 存活检测全部完成，最后一次发送剩余节点后再关闭通道。
+				// 存活检测全部完成，最后一次发送剩余节点后再关闭后续阶段输入通道。
 				sendNewNodes()
-				close(speedChan)
+				if speedON {
+					close(speedChan)
+				} else if mediaON {
+					close(mediaChan)
+				}
 				return
 			case <-extraTimeout:
 				// 超时后额外等待5分钟已到
@@ -497,7 +514,11 @@ func Check() ([]Result, error) {
 				slog.Warn("超时后额外等待5分钟已到，停止收集后台节点",
 					"累计已发送", speedSentCount.Load(),
 					"总存活", tracker.aliveSuccess.Load())
-				close(speedChan)
+				if speedON {
+					close(speedChan)
+				} else if mediaON {
+					close(mediaChan)
+				}
 				return
 			case <-ticker.C:
 				sendNewNodes()
@@ -507,28 +528,37 @@ func Check() ([]Result, error) {
 
 	// 级联关闭通道
 	go func() {
-		speedWG.Wait()
-		slog.Info("测速检测完成", 
-			"发送数", speedSentCount.Load(), 
-			"处理数", tracker.speedDone.Load(),
-			"通过数", tracker.speedSuccess.Load())
-		slog.Info("测速统计", 
-			"<10KB/s", speedStatsUnder10.Load(),
-			"10-50KB/s", speedStatsUnder50.Load(),
-			"50-100KB/s", speedStatsUnder100.Load(),
-			"100-500KB/s", speedStatsUnder500.Load(),
-			"500-1000KB/s", speedStatsUnder1000.Load(),
-			">=1000KB/s", speedStatsOver1000.Load())
-		close(mediaChan)
+		if speedON {
+			speedWG.Wait()
+			if mediaON {
+				tracker.SetStage(2, "媒体检测")
+			}
+			slog.Info("测速检测完成", 
+				"阶段总量", speedSentCount.Load(), 
+				"阶段完成", tracker.speedDone.Load(),
+				"阶段通过", tracker.speedSuccess.Load())
+			slog.Info("测速统计", 
+				"<10KB/s", speedStatsUnder10.Load(),
+				"10-50KB/s", speedStatsUnder50.Load(),
+				"50-100KB/s", speedStatsUnder100.Load(),
+				"100-500KB/s", speedStatsUnder500.Load(),
+				"500-1000KB/s", speedStatsUnder1000.Load(),
+				">=1000KB/s", speedStatsOver1000.Load())
+			if mediaON {
+				close(mediaChan)
+				return
+			}
+		}
+		close(resultChan)
 	}()
 	go func() {
 		mediaWG.Wait()
 		if mediaON {
 			slog.Info("媒体检测完成", 
-				"发送数", tracker.speedSuccess.Load(), 
-				"处理数", tracker.mediaDone.Load())
+				"阶段总量", tracker.speedSuccess.Load(), 
+				"阶段完成", tracker.mediaDone.Load())
+			close(resultChan)
 		}
-		close(resultChan)
 	}()
 
 collectResults:
@@ -549,8 +579,8 @@ collectResults:
 	slog.Info("检测完成统计",
 		"总节点数", len(proxies),
 		"存活节点数", tracker.aliveSuccess.Load(),
-		"测速通过数", tracker.speedSuccess.Load(),
-		"媒体检测数", tracker.mediaDone.Load(),
+		"测速阶段通过", tracker.speedSuccess.Load(),
+		"媒体阶段完成", tracker.mediaDone.Load(),
 		"最终可用数", len(results))
 	slog.Info(fmt.Sprintf("可用节点数量: %d", len(results)))
 	slog.Info(fmt.Sprintf("测试总消耗流量: %.3fGB", float64(TotalBytes.Load())/1024/1024/1024))
@@ -590,7 +620,7 @@ func getConcurrency(total int, base int, ratio float64) int {
 
 // updateProxyName 更新代理名称
 // 返回 true 表示节点应被过滤（跳过）
-func updateProxyName(res *Result, httpClient *ProxyClient, speed int) bool {
+func updateProxyName(ctx context.Context, res *Result, httpClient *ProxyClient, speed int) bool {
 	// 以节点IP查询位置重命名节点
 	if config.GlobalConfig.RenameNode {
 		var fraudScore int
@@ -601,7 +631,7 @@ func updateProxyName(res *Result, httpClient *ProxyClient, speed int) bool {
 			country = res.Country
 			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(country, fraudScore)
 		} else {
-			country, _, fs := proxyutils.GetProxyCountry(httpClient.Client)
+			country, _, fs := proxyutils.GetProxyCountry(ctx, httpClient.Client)
 			fraudScore = fs
 			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(country, fraudScore)
 		}
@@ -698,16 +728,17 @@ func showProgress(done chan bool, total int) {
 			return
 		case <-ticker.C:
 			p := Progress.Load()
-			pct := float64(p) / float64(total) * 100
+			pct := float64(p) / 100
 			if pct > 100 {
 				pct = 100
 			}
 			available := Available.Load()
+			virtualProcessed := int(float64(total) * pct / 100)
 
 			fmt.Printf("\r进度: [%-45s] %.1f%% (%d/%d) 可用: %d",
 				strings.Repeat("=", int(pct/2))+">",
 				pct,
-				p,
+				virtualProcessed,
 				total,
 				available)
 		}

@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,7 +40,7 @@ func (r *networkLimitedReader) Read(p []byte) (n int, err error) {
 	return r.reader.Read(p)
 }
 
-func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter *uint64) (int, int64, error) {
+func CheckSpeed(ctx context.Context, httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter *uint64) (int, int64, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Debug(fmt.Sprintf("CheckSpeed发生panic: %v", r))
@@ -58,7 +59,7 @@ func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter 
 		Transport: httpClient.Transport,
 	}
 
-	req, err := http.NewRequest("GET", config.GlobalConfig.SpeedTestUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", config.GlobalConfig.SpeedTestUrl, nil)
 	if err != nil {
 		return 0, 0, err
 	}
