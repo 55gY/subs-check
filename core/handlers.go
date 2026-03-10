@@ -497,8 +497,8 @@ func (app *App) getStatus(c *gin.Context) {
 		"progressPercent": func() float64 {
 			return float64(checker.Progress.Load()) / 100
 		}(),
-		"failed":     failed,
-		"stage":      stage,
+		"failed": failed,
+		"stage":  stage,
 	}
 
 	// 添加详细统计信息
@@ -507,18 +507,18 @@ func (app *App) getStatus(c *gin.Context) {
 		currentStage, currentStageName, currentStageDone, currentStageSuccess, currentStageTotal := checker.CurrentTracker.GetStageInfo()
 		timeoutRemaining := checker.CurrentTracker.GetTimeoutRemaining()
 		response["detailStats"] = gin.H{
-			"totalNodes":       totalNodes,
-			"aliveSuccess":     aliveSuccess,
-			"aliveDone":        aliveDone,
-			"speedSuccess":     speedSuccess,
-			"speedDone":        speedDone,
-			"mediaDone":        mediaDone,
-			"currentStage":     currentStage,
-			"currentStageName": currentStageName,
-			"currentStageDone": currentStageDone,
+			"totalNodes":          totalNodes,
+			"aliveSuccess":        aliveSuccess,
+			"aliveDone":           aliveDone,
+			"speedSuccess":        speedSuccess,
+			"speedDone":           speedDone,
+			"mediaDone":           mediaDone,
+			"currentStage":        currentStage,
+			"currentStageName":    currentStageName,
+			"currentStageDone":    currentStageDone,
 			"currentStageSuccess": currentStageSuccess,
-			"currentStageTotal": currentStageTotal,
-			"timeoutRemaining": timeoutRemaining, // 超时倒计时（秒）
+			"currentStageTotal":   currentStageTotal,
+			"timeoutRemaining":    timeoutRemaining, // 超时倒计时（秒）
 		}
 	}
 
@@ -944,7 +944,7 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 			}
 
 			// 存活检测
-			alive, err := checker.CheckAlive(client.Client)
+			alive, err := checker.CheckAlive(ctx, client.Client)
 			if err != nil || !alive {
 				failedCount.Add(1)
 				return
@@ -960,7 +960,7 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 
 			// 速度测试
 			if config.GlobalConfig.SpeedTestUrl != "" {
-				speed, _, err := checker.CheckSpeed(client.Client, checker.Bucket, client.BytesRead)
+				speed, _, err := checker.CheckSpeed(ctx, client.Client, checker.Bucket, client.BytesRead)
 				if err != nil || speed < config.GlobalConfig.MinSpeed {
 					failedCount.Add(1)
 					return
@@ -1078,7 +1078,7 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 	// 保存原始数据用于日志
 	originalData := make([]byte, len(data))
 	copy(originalData, data)
-	
+
 	// 尝试 base64 解码，失败就用原数据
 	// 注意：去除所有空白字符，支持 URL-safe base64，自动补齐 padding
 	trimmedData := strings.ReplaceAll(string(data), " ", "")
@@ -1093,10 +1093,10 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 	if padLen > 0 {
 		trimmedData += strings.Repeat("=", 4-padLen)
 	}
-	
+
 	wasDecoded := false
 	var decodedData []byte
-	
+
 	if decoded, err := base64.StdEncoding.DecodeString(trimmedData); err == nil {
 		// 启发式验证：检查解码结果是否是有效文本
 		isValidText := true
@@ -1112,7 +1112,7 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 				break
 			}
 		}
-		
+
 		if isValidText {
 			// 简单验证：解码后的内容应该包含常见协议或 proxies 关键字
 			decodedStr := string(decoded)
@@ -1187,12 +1187,12 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 
 	// 解析失败，清理旧日志并将数据写入日志文件以便调试
 	cleanupOldParseLogs()
-	
+
 	logFile := fmt.Sprintf("parse_error_%d.log", time.Now().Unix())
 	if f, err := os.Create(logFile); err == nil {
 		defer f.Close()
 		f.WriteString(fmt.Sprintf("=== 解析失败时间: %s ===\n", time.Now().Format("2006-01-02 15:04:05")))
-		
+
 		// 字符编码信息
 		f.WriteString("\n=== 字符编码检测 ===\n")
 		if len(originalData) >= 3 && originalData[0] == 0xEF && originalData[1] == 0xBB && originalData[2] == 0xBF {
@@ -1201,12 +1201,12 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 			f.WriteString("检测到 UTF-8 BOM: 否\n")
 		}
 		f.WriteString(fmt.Sprintf("数据有效性: UTF-8=%v\n", utf8.Valid(originalData)))
-		
+
 		// 原始数据
 		f.WriteString("\n=== 原始数据 ===\n")
 		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(originalData)))
 		f.WriteString(fmt.Sprintf("内容（前1000字节）:\n%s\n", string(originalData[:min(1000, len(originalData))])))
-		
+
 		// Base64 解码信息
 		f.WriteString("\n=== Base64 解码尝试 ===\n")
 		if wasDecoded {
@@ -1216,7 +1216,7 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 		} else {
 			f.WriteString("解码结果: 未解码或解码失败\n")
 		}
-		
+
 		// YAML 解析详情
 		f.WriteString("\n=== YAML 解析详情 ===\n")
 		var con map[string]any
@@ -1224,7 +1224,7 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 			f.WriteString("YAML 语法: 有效\n")
 			f.WriteString(fmt.Sprintf("包含 'proxies' 字段: %v\n", containsKey(con, "proxies")))
 			f.WriteString(fmt.Sprintf("包含 'proxy-providers' 字段: %v\n", containsKey(con, "proxy-providers")))
-			
+
 			if proxyInterface, ok := con["proxies"]; ok && proxyInterface != nil {
 				if proxyList, ok := proxyInterface.([]any); ok {
 					f.WriteString(fmt.Sprintf("proxies 数组长度: %d\n", len(proxyList)))
@@ -1249,7 +1249,7 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 		} else {
 			f.WriteString(fmt.Sprintf("YAML 语法: 无效 - %v\n", err))
 		}
-		
+
 		// 前 20 个节点名称（检查乱码）
 		if len(proxies) > 0 {
 			f.WriteString(fmt.Sprintf("\n=== 前 20 个节点名称 ===\n"))
@@ -1259,12 +1259,12 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 				}
 			}
 		}
-		
+
 		// 提取的链接信息
 		f.WriteString(fmt.Sprintf("\n=== 最终处理的数据 ===\n"))
 		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(data)))
 		f.WriteString(fmt.Sprintf("提取的链接数: %d\n", len(links)))
-		
+
 		if len(links) > 0 {
 			f.WriteString(fmt.Sprintf("\n=== 提取的链接（前10个）===\n"))
 			for i, link := range links[:min(10, len(links))] {
@@ -1289,29 +1289,29 @@ func cleanupOldParseLogs() {
 		slog.Debug("查找 parse_error 日志文件失败", "error", err)
 		return
 	}
-	
+
 	now := time.Now()
 	twoDaysAgo := now.AddDate(0, 0, -2).Truncate(24 * time.Hour)
-	
+
 	for _, file := range files {
 		// 从文件名提取时间戳：parse_error_<timestamp>.log
 		basename := filepath.Base(file)
 		if !strings.HasPrefix(basename, "parse_error_") || !strings.HasSuffix(basename, ".log") {
 			continue
 		}
-		
+
 		timestampStr := strings.TrimPrefix(basename, "parse_error_")
 		timestampStr = strings.TrimSuffix(timestampStr, ".log")
-		
+
 		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
 		if err != nil {
 			slog.Debug("解析日志文件时间戳失败", "file", file, "error", err)
 			continue
 		}
-		
+
 		fileTime := time.Unix(timestamp, 0)
 		fileDateOnly := fileTime.Truncate(24 * time.Hour)
-		
+
 		// 删除超过 2 天的日志（保留今天和昨天）
 		if fileDateOnly.Before(twoDaysAgo) {
 			if err := os.Remove(file); err != nil {

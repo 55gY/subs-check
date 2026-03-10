@@ -27,6 +27,7 @@ var (
 	speedStatsUnder500  atomic.Int32
 	speedStatsUnder1000 atomic.Int32
 	speedStatsOver1000  atomic.Int32
+	receivedCounter     atomic.Int32
 )
 
 // aliveWorkerCollect 存活检测worker（收集模式）
@@ -165,7 +166,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				tracker.CountSpeed(false)
 				continue
 			}
-			
+
 			// 统计速度区间 - 使用全局 atomic 计数器
 			if speed < 10 {
 				speedStatsUnder10.Add(1)
@@ -180,7 +181,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 			} else {
 				speedStatsOver1000.Add(1)
 			}
-			
+
 			if speed < config.GlobalConfig.MinSpeed {
 				item.Client.Close()
 				tracker.CountSpeed(false)
