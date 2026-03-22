@@ -203,6 +203,7 @@ total-speed-limit: 0
 15. 为测速与媒体检测网络请求接入 `context`，使强制关闭和超时能更快中断 HTTP 请求。
 16. 为 IP 查询与重命名链路接入 `context`，使位置查询、纯净度评分和重命名阶段也能响应取消信号。
 17. 统一阶段1取消模型，为 `CheckAlive` / `CheckAliveWithWarmup` 接入外部 `context`，并让 alive worker 在发送到后续阶段前也能及时响应取消。
+18. 调整基础重命名规则：`rename-node` 仅保留国家代码，IP 纯净度仅在启用 `iprisk` 时以标签形式追加，避免基础名自带纯净度造成重复显示。
 
 **影响范围**:
 1. `checker/pipeline.go` 的阶段2-3流水线调度与测速保护。
@@ -219,6 +220,7 @@ total-speed-limit: 0
 12. `checker/speed.go`、`checker/media.go`、`checker/ai.go` 的请求函数签名与调用链。
 13. `provider/info.go` 与 `updateProxyName(...)` 的 IP 查询/重命名调用链。
 14. `checker/alive.go` 与 `checker/worker.go` 中阶段1请求和后续发送逻辑。
+15. `provider/process.go` 与 `README.md` 中基础命名规则和 `iprisk` 标签语义说明。
 
 **注意事项**:
 1. 若链路带宽有限但测速并发过高，仍会导致测速结果失真。
@@ -228,6 +230,7 @@ total-speed-limit: 0
 5. 状态接口中的 `failed` 现在只统计已明确失败的存活/测速节点，不再把媒体处理中节点计入失败。
 6. 文档变更记录中的各字段内容统一使用序号格式，便于阅读。
 7. Web 面板中的“阶段进度”现在显示为 `已完成/当前阶段总量`，比单纯显示累计完成数更直观。
+8. 若需要在节点名中显示 IP 纯净度，请确保 `platforms` 中启用了 `iprisk`。
 8. Web 面板中的“任务进度”现在优先显示当前阶段进度，总进度百分比仍保留为整体加权进度，用于反映整轮任务完成度。
 9. 详细统计中的“总进度”现在直接显示百分比，避免把加权虚拟进度误解为真实已处理节点数。
 10. `checker.Progress` 的内部语义已切换为“百分比 × 100”；如果后续有其他代码直接读取该值，应按百分比语义使用。
@@ -267,9 +270,9 @@ node-prefix: ""
 
 **节点命名规则：**
 
-启用 `rename-node` 后，程序会根据节点 IP 的归属地和纯净度评分自动重命名节点：
+启用 `rename-node` 后，程序会根据节点 IP 的归属地重命名节点；若同时启用 `iprisk`，纯净度会作为标签追加到节点名中：
 
-**命名格式：** `[前缀]国家代码_纯净度等级[_备注]`
+**命名格式：** `[前缀]国家代码[|纯净度等级][|其它标签]`
 
 **纯净度等级评分标准：**（基于 IPPure fraudScore，0-100分）
 - **0-10**：极佳 - IP 质量极高，几乎无风险
@@ -281,10 +284,10 @@ node-prefix: ""
 
 **命名示例：**
 ```
-US_优秀          # 美国节点，fraudScore 11-30
-HK_中等          # 香港节点，fraudScore 51-70
-JP_极佳          # 日本节点，fraudScore 0-10
-SG_良好_备注     # 新加坡节点，fraudScore 31-50，带自定义备注
+US               # 仅启用 rename-node
+HK|中等          # 同时启用 iprisk，fraudScore 51-70
+JP|极佳          # 同时启用 iprisk，fraudScore 0-10
+SG|良好|备注     # 同时启用 iprisk，且带自定义备注
 ```
 
 **IP 位置查询 API 优先级：**
@@ -298,6 +301,7 @@ SG_良好_备注     # 新加坡节点，fraudScore 31-50，带自定义备注
 - IP 查询可能因节点质量差导致失败，会稍微影响整体检测速度
 - 如果主 API 失败，会自动降级到备用 API（但备用 API 不提供 fraudScore，默认为0）
 - `iprisk` 检测平台会直接使用重命名时获取的 fraudScore，无需额外 API 调用
+- 基础重命名结果只保留国家代码，纯净度仅在启用 `iprisk` 时以标签形式追加
 
 ### 媒体解锁检测
 

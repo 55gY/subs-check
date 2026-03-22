@@ -43,13 +43,9 @@ var (
 	counterLock = sync.Mutex{}
 )
 
-// Rename 根据国家代码和fraudScore生成节点名称
-// 格式: CountryCode_纯净度描述 (例如: HK_中等)
+// Rename 根据国家代码生成节点名称
+// 格式: CountryCode
 func Rename(countryCode string, fraudScore int) string {
-	qualityLabel := GetFraudScoreLabel(fraudScore)
-	if qualityLabel != "" {
-		return countryCode + "_" + qualityLabel
-	}
 	return countryCode
 }
 
