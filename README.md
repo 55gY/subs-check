@@ -204,6 +204,7 @@ total-speed-limit: 0
 16. 为 IP 查询与重命名链路接入 `context`，使位置查询、纯净度评分和重命名阶段也能响应取消信号。
 17. 统一阶段1取消模型，为 `CheckAlive` / `CheckAliveWithWarmup` 接入外部 `context`，并让 alive worker 在发送到后续阶段前也能及时响应取消。
 18. 调整基础重命名规则：`rename-node` 仅保留国家代码，IP 纯净度仅在启用 `iprisk` 时以标签形式追加，避免基础名自带纯净度造成重复显示。
+19. 修正媒体阶段统计语义：只有命中至少一个媒体/标签结果时才计入成功；状态接口中的 `stageStats` 同时新增成功率与超时率字段。
 
 **影响范围**:
 1. `checker/pipeline.go` 的阶段2-3流水线调度与测速保护。
@@ -221,6 +222,7 @@ total-speed-limit: 0
 13. `provider/info.go` 与 `updateProxyName(...)` 的 IP 查询/重命名调用链。
 14. `checker/alive.go` 与 `checker/worker.go` 中阶段1请求和后续发送逻辑。
 15. `provider/process.go` 与 `README.md` 中基础命名规则和 `iprisk` 标签语义说明。
+16. `checker/progress.go` 与 `core/handlers.go` 输出的阶段统计语义。
 
 **注意事项**:
 1. 若链路带宽有限但测速并发过高，仍会导致测速结果失真。
@@ -240,6 +242,7 @@ total-speed-limit: 0
 14. 现在测速与媒体检测的大部分 HTTP 请求已绑定 `context`；取消时通常会比仅依赖 `http.Client.Timeout` 更快退出。
 15. 现在 IP 位置查询与重命名相关请求也已绑定 `context`；取消时不再必须等待整轮位置查询链路全部超时后才退出。
 16. 现在阶段1存活检测的预热与正式请求也已绑定外部 `context`；在强制关闭、超时或阶段切换时会更快停止，不再只依赖内部 timeout 自行结束。
+17. 状态接口中的 `stageStats.alive/speed/media` 现在除 `done/success/failed/timeouts/averageMs` 外，还会返回 `successRate` 与 `timeoutRate`；媒体阶段的 `success/failed` 也会基于真实命中结果统计。
 
 ### Web 服务配置
 
@@ -318,6 +321,11 @@ platforms:
   - gemini      # Google Gemini
   - tiktok      # TikTok
   - iprisk      # IP 风险评估
+
+说明：
+- `platforms` 按配置顺序执行，常用或更想优先看到结果的平台可以放前面。
+- 请尽量避免重复配置同一平台，虽然程序会做去重保护，但保持配置简洁更利于排查问题。
+- 若依赖 `filters` 基于国家/纯净度做过滤，建议保留 `iprisk`，并尽量靠前放置，便于更早拿到 `Country` / `IPRisk` 信息。
 ```
 
 ### 订阅源配置

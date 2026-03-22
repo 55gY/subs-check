@@ -1,4 +1,4 @@
-package checker
+﻿package checker
 
 import (
 	"context"
@@ -298,7 +298,7 @@ func Check() ([]Result, error) {
 		// 普通模式: 使用配置的超时
 		singleNodeTimeMs = config.GlobalConfig.Timeout
 	}
-	
+
 	// 基础时间 = (节点数 / 并发数 * 单节点超时) + 缓冲时间
 	baseTime := time.Duration(len(proxies)/aliveConc*singleNodeTimeMs)*time.Millisecond + 60*time.Second
 	// 乘以2倍安全系数，考虑网络波动和worker调度延迟
@@ -310,8 +310,8 @@ func Check() ([]Result, error) {
 		expectedTime = 30 * time.Minute // 最多30分钟
 	}
 	tracker.SetTimeout(expectedTime)
-	slog.Info("设置存活检测超时", 
-		"预计时间", expectedTime.String(), 
+	slog.Info("设置存活检测超时",
+		"预计时间", expectedTime.String(),
 		"基础时间", baseTime.String(),
 		"单节点时间", fmt.Sprintf("%dms", singleNodeTimeMs))
 
@@ -329,9 +329,9 @@ func Check() ([]Result, error) {
 		progressDone <- true   // 停止进度报告
 		aliveCancel()          // 取消阶段1的 context，确保所有 workers 退出
 		slog.Info("======== 存活检测完成 ========")
-		slog.Info("存活统计", 
-			"总节点数", len(proxies), 
-			"通过数量", tracker.aliveSuccess.Load(), 
+		slog.Info("存活统计",
+			"总节点数", len(proxies),
+			"通过数量", tracker.aliveSuccess.Load(),
 			"存活率", fmt.Sprintf("%.2f%%", float64(tracker.aliveSuccess.Load())/float64(len(proxies))*100))
 		slog.Info("活跃 goroutine 数", "数量", runtime.NumGoroutine())
 	case <-timeout:
@@ -358,7 +358,7 @@ func Check() ([]Result, error) {
 	var speedMediaCancel context.CancelFunc
 	var speedChan chan PipelineItem
 	var mediaChan chan PipelineItem
-	
+
 	// 如果没有存活节点或者不需要测速和媒体，直接返回
 	if len(aliveResults) == 0 || (!speedON && !mediaON) {
 		if len(aliveResults) == 0 {
@@ -371,7 +371,7 @@ func Check() ([]Result, error) {
 	// 阶段2-3：根据配置获取测速和媒体并发数
 	speedConc = config.GlobalConfig.GetSpeedConcurrent()
 	mediaConc = config.GlobalConfig.GetMediaConcurrent()
-	
+
 	// 上限保护
 	if speedConc > 300 {
 		speedConc = 300
@@ -408,7 +408,7 @@ func Check() ([]Result, error) {
 			speedConc = safeCap
 		}
 	}
-	
+
 	// 根据实际节点数优化：如果存活节点很少，减少并发避免浪费
 	aliveCount = len(aliveResults)
 	if speedON && aliveCount < speedConc {
@@ -417,11 +417,11 @@ func Check() ([]Result, error) {
 			speedConc = 1
 		}
 	}
-	
+
 	slog.Info("======== 阶段2-3: 测速+媒体检测 ========")
-	slog.Info("动态并发分配", 
+	slog.Info("动态并发分配",
 		"存活节点数", aliveCount,
-		"测速并发", speedConc, 
+		"测速并发", speedConc,
 		"媒体并发", mediaConc)
 
 	speedChan = make(chan PipelineItem, speedConc)
@@ -460,7 +460,7 @@ func Check() ([]Result, error) {
 		lastSentCount := 0
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
-		
+
 		extraTimeout := time.After(5 * time.Minute)
 		sendNewNodes := func() bool {
 			aliveResultsMutex.Lock()
@@ -496,7 +496,7 @@ func Check() ([]Result, error) {
 		}
 
 		sendNewNodes()
-		
+
 		for {
 			select {
 			case <-aliveWaitDone:
@@ -533,11 +533,11 @@ func Check() ([]Result, error) {
 			if mediaON {
 				tracker.SetStage(2, "媒体检测")
 			}
-			slog.Info("测速检测完成", 
-				"阶段总量", speedSentCount.Load(), 
+			slog.Info("测速检测完成",
+				"阶段总量", speedSentCount.Load(),
 				"阶段完成", tracker.speedDone.Load(),
 				"阶段通过", tracker.speedSuccess.Load())
-			slog.Info("测速统计", 
+			slog.Info("测速统计",
 				"<10KB/s", speedStatsUnder10.Load(),
 				"10-50KB/s", speedStatsUnder50.Load(),
 				"50-100KB/s", speedStatsUnder100.Load(),
@@ -554,8 +554,8 @@ func Check() ([]Result, error) {
 	go func() {
 		mediaWG.Wait()
 		if mediaON {
-			slog.Info("媒体检测完成", 
-				"阶段总量", tracker.speedSuccess.Load(), 
+			slog.Info("媒体检测完成",
+				"阶段总量", tracker.speedSuccess.Load(),
 				"阶段完成", tracker.mediaDone.Load())
 			close(resultChan)
 		}
@@ -635,7 +635,7 @@ func updateProxyName(ctx context.Context, res *Result, httpClient *ProxyClient, 
 			fraudScore = fs
 			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(country, fraudScore)
 		}
-		
+
 		// 检查国家代码是否应被过滤
 		if shouldSkipByCountryCode(country) {
 			return true
@@ -765,6 +765,7 @@ func parseFraudScoreFromLabel(label string) int {
 		return 0
 	}
 }
+
 // shouldSkipByCountryCode 根据国家代码判断是否应该跳过节点
 // 如果 Filters 为空，不过滤任何节点
 // 使用前缀匹配方式检查国家代码
@@ -773,7 +774,7 @@ func shouldSkipByCountryCode(countryCode string) bool {
 	if len(config.GlobalConfig.Filters) == 0 {
 		return false
 	}
-	
+
 	// 检查国家代码是否匹配任何过滤规则（前缀匹配）
 	for _, filter := range config.GlobalConfig.Filters {
 		if strings.HasPrefix(countryCode, filter) {

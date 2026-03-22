@@ -30,6 +30,14 @@ var (
 	receivedCounter     atomic.Int32
 )
 
+func hasMediaResult(result *Result) bool {
+	if result == nil {
+		return false
+	}
+
+	return result.Openai || result.OpenaiWeb || result.Youtube != "" || result.Netflix || result.Disney || result.Gemini || result.TikTok != "" || result.IPRisk != ""
+}
+
 // aliveWorkerCollect 存活检测worker（收集模式）
 func aliveWorkerCollect(ctx context.Context, in <-chan PipelineItem, results *[]PipelineItem, mutex *sync.Mutex, tracker *ProgressTracker, speedON, mediaON bool) {
 	for {
@@ -160,13 +168,13 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				return
 			}
 
-			speed, _, err := CheckSpeed(ctx, item.Client.Client, Bucket, item.Client.BytesRead)
+			metrics, err := CheckSpeed(ctx, item.Client.Client, item.Client.BytesRead)
 			if err != nil {
 				item.Client.Close()
-				tracker.CountSpeed(false)
+				tracker.CountSpeedWithDuration(false, metrics.TotalDuration, metrics.ContextCanceled)
 				continue
 			}
-
+			speed := metrics.SpeedKBps
 			// 统计速度区间 - 使用全局 atomic 计数器
 			if speed < 10 {
 				speedStatsUnder10.Add(1)
@@ -184,12 +192,12 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 
 			if speed < config.GlobalConfig.MinSpeed {
 				item.Client.Close()
-				tracker.CountSpeed(false)
+				tracker.CountSpeedWithDuration(false, metrics.TotalDuration, false)
 				continue
 			}
 
 			item.Speed = speed
-			tracker.CountSpeed(true)
+			tracker.CountSpeedWithDuration(true, metrics.TotalDuration, false)
 
 			if mediaON {
 				receivedCounter.Add(1)
@@ -227,11 +235,23 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 			if !ok {
 				return
 			}
+			start := time.Now()
 			// Media checks
 			if config.GlobalConfig.MediaCheck {
+				seenPlatforms := make(map[string]struct{}, len(config.GlobalConfig.Platforms))
 				for _, plat := range config.GlobalConfig.Platforms {
+					if _, exists := seenPlatforms[plat]; exists {
+						continue
+					}
+					seenPlatforms[plat] = struct{}{}
+					if ctx.Err() != nil {
+						break
+					}
 					switch plat {
 					case "openai":
+						if item.Result.Openai || item.Result.OpenaiWeb {
+							continue
+						}
 						cookiesOK, clientOK := CheckOpenAI(ctx, item.Client.Client)
 						if clientOK && cookiesOK {
 							item.Result.Openai = true
@@ -239,22 +259,37 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 							item.Result.OpenaiWeb = true
 						}
 					case "youtube":
+						if item.Result.Youtube != "" {
+							continue
+						}
 						if region, _ := CheckYoutube(ctx, item.Client.Client); region != "" {
 							item.Result.Youtube = region
 						}
 					case "netflix":
+						if item.Result.Netflix {
+							continue
+						}
 						if ok, _ := CheckNetflix(ctx, item.Client.Client); ok {
 							item.Result.Netflix = true
 						}
 					case "disney":
+						if item.Result.Disney {
+							continue
+						}
 						if ok, _ := CheckDisney(ctx, item.Client.Client); ok {
 							item.Result.Disney = true
 						}
 					case "gemini":
+						if item.Result.Gemini {
+							continue
+						}
 						if ok, _ := CheckGemini(ctx, item.Client.Client); ok {
 							item.Result.Gemini = true
 						}
 					case "iprisk":
+						if item.Result.IP != "" && item.Result.IPRisk != "" {
+							continue
+						}
 						country, ip, fraudScore := proxyutils.GetProxyCountry(ctx, item.Client.Client)
 						if ip != "" {
 							item.Result.IP = ip
@@ -262,6 +297,9 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 							item.Result.IPRisk = proxyutils.GetFraudScoreLabel(fraudScore)
 						}
 					case "tiktok":
+						if item.Result.TikTok != "" {
+							continue
+						}
 						if region, _ := CheckTikTok(ctx, item.Client.Client); region != "" {
 							item.Result.TikTok = region
 						}
@@ -269,7 +307,7 @@ func mediaWorker(ctx context.Context, in <-chan PipelineItem, resOut chan<- Resu
 				}
 			}
 
-			tracker.CountMedia()
+			tracker.CountMediaWithResult(hasMediaResult(item.Result), time.Since(start), false)
 			if updateProxyName(ctx, item.Result, item.Client, item.Speed) {
 				// 节点被过滤，关闭连接并跳过
 				item.Client.Close()

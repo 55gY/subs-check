@@ -6,6 +6,31 @@ import (
 	"time"
 )
 
+type StageStats struct {
+	Done          int32 `json:"done"`
+	Success       int32 `json:"success"`
+	Failed        int32 `json:"failed"`
+	Timeouts      int32 `json:"timeouts"`
+	TotalDuration int64 `json:"-"`
+	AverageMs     int64 `json:"averageMs"`
+	SuccessRate   int64 `json:"successRate"`
+	TimeoutRate   int64 `json:"timeoutRate"`
+}
+
+type ProgressStats struct {
+	Alive StageStats `json:"alive"`
+	Speed StageStats `json:"speed"`
+	Media StageStats `json:"media"`
+}
+
+func finalizeStageStats(stats *StageStats) {
+	if stats.Done > 0 {
+		stats.AverageMs = stats.TotalDuration / int64(stats.Done)
+		stats.SuccessRate = int64(stats.Success) * 100 / int64(stats.Done)
+		stats.TimeoutRate = int64(stats.Timeouts) * 100 / int64(stats.Done)
+	}
+}
+
 // 默认使用动态权重显示进度条
 var progressAlgorithm ProgressAlgorithm
 
@@ -42,6 +67,7 @@ type ProgressTracker struct {
 	// 成功数量
 	aliveSuccess atomic.Int32
 	speedSuccess atomic.Int32
+	mediaSuccess atomic.Int32
 
 	// 当前处于 测活-测速-媒体检测 阶段 (0=存活, 1=测速, 2=媒体)
 	currentStage atomic.Int32
@@ -55,6 +81,13 @@ type ProgressTracker struct {
 	// 超时倒计时相关
 	timeoutStartTime atomic.Value // time.Time
 	timeoutDuration  atomic.Value // time.Duration
+
+	aliveTotalDuration atomic.Int64
+	aliveTimeouts      atomic.Int32
+	speedTotalDuration atomic.Int64
+	speedTimeouts      atomic.Int32
+	mediaTotalDuration atomic.Int64
+	mediaTimeouts      atomic.Int32
 }
 
 // NewProgressTracker 初始化进度追踪器并重置外部原子变量。
@@ -95,25 +128,62 @@ func getCheckWeight(speedON, mediaON bool) ProgressWeight {
 
 // CountAlive 标记一个存活检测已完成，并更新进度。
 func (pt *ProgressTracker) CountAlive(success bool) {
+	pt.CountAliveWithDuration(success, 0, false)
+}
+
+func (pt *ProgressTracker) CountAliveWithDuration(success bool, duration time.Duration, timeout bool) {
 	pt.aliveDone.Add(1)
 	if success {
 		pt.aliveSuccess.Add(1)
+	}
+	if duration > 0 {
+		pt.aliveTotalDuration.Add(duration.Milliseconds())
+	}
+	if timeout {
+		pt.aliveTimeouts.Add(1)
 	}
 	pt.refresh()
 }
 
 // CountSpeed 标记一个测速已完成，并更新进度。
 func (pt *ProgressTracker) CountSpeed(success bool) {
+	pt.CountSpeedWithDuration(success, 0, false)
+}
+
+func (pt *ProgressTracker) CountSpeedWithDuration(success bool, duration time.Duration, timeout bool) {
 	pt.speedDone.Add(1)
 	if success {
 		pt.speedSuccess.Add(1)
+	}
+	if duration > 0 {
+		pt.speedTotalDuration.Add(duration.Milliseconds())
+	}
+	if timeout {
+		pt.speedTimeouts.Add(1)
 	}
 	pt.refresh()
 }
 
 // CountMedia 标记一个媒体检测已完成，并更新进度。
 func (pt *ProgressTracker) CountMedia() {
+	pt.CountMediaWithResult(false, 0, false)
+}
+
+func (pt *ProgressTracker) CountMediaWithDuration(duration time.Duration, timeout bool) {
+	pt.CountMediaWithResult(false, duration, timeout)
+}
+
+func (pt *ProgressTracker) CountMediaWithResult(success bool, duration time.Duration, timeout bool) {
 	pt.mediaDone.Add(1)
+	if success {
+		pt.mediaSuccess.Add(1)
+	}
+	if duration > 0 {
+		pt.mediaTotalDuration.Add(duration.Milliseconds())
+	}
+	if timeout {
+		pt.mediaTimeouts.Add(1)
+	}
 	pt.refresh()
 }
 
@@ -125,6 +195,44 @@ func (pt *ProgressTracker) GetStats() (totalNodes, aliveSuccess, aliveDone, spee
 		pt.speedSuccess.Load(),
 		pt.speedDone.Load(),
 		pt.mediaDone.Load()
+}
+
+func (pt *ProgressTracker) GetDetailedStats() ProgressStats {
+	aliveDone := pt.aliveDone.Load()
+	speedDone := pt.speedDone.Load()
+	mediaDone := pt.mediaDone.Load()
+	aliveSuccess := pt.aliveSuccess.Load()
+	speedSuccess := pt.speedSuccess.Load()
+
+	stats := ProgressStats{
+		Alive: StageStats{
+			Done:          aliveDone,
+			Success:       aliveSuccess,
+			Failed:        aliveDone - aliveSuccess,
+			Timeouts:      pt.aliveTimeouts.Load(),
+			TotalDuration: pt.aliveTotalDuration.Load(),
+		},
+		Speed: StageStats{
+			Done:          speedDone,
+			Success:       speedSuccess,
+			Failed:        speedDone - speedSuccess,
+			Timeouts:      pt.speedTimeouts.Load(),
+			TotalDuration: pt.speedTotalDuration.Load(),
+		},
+		Media: StageStats{
+			Done:          mediaDone,
+			Success:       pt.mediaSuccess.Load(),
+			Failed:        mediaDone - pt.mediaSuccess.Load(),
+			Timeouts:      pt.mediaTimeouts.Load(),
+			TotalDuration: pt.mediaTotalDuration.Load(),
+		},
+	}
+
+	finalizeStageStats(&stats.Alive)
+	finalizeStageStats(&stats.Speed)
+	finalizeStageStats(&stats.Media)
+
+	return stats
 }
 
 // refresh 计算并更新全局进度。

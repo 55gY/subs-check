@@ -506,6 +506,7 @@ func (app *App) getStatus(c *gin.Context) {
 		totalNodes, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone := checker.CurrentTracker.GetStats()
 		currentStage, currentStageName, currentStageDone, currentStageSuccess, currentStageTotal := checker.CurrentTracker.GetStageInfo()
 		timeoutRemaining := checker.CurrentTracker.GetTimeoutRemaining()
+		detailedStats := checker.CurrentTracker.GetDetailedStats()
 		response["detailStats"] = gin.H{
 			"totalNodes":          totalNodes,
 			"aliveSuccess":        aliveSuccess,
@@ -519,6 +520,7 @@ func (app *App) getStatus(c *gin.Context) {
 			"currentStageSuccess": currentStageSuccess,
 			"currentStageTotal":   currentStageTotal,
 			"timeoutRemaining":    timeoutRemaining, // 超时倒计时（秒）
+			"stageStats":          detailedStats,
 		}
 	}
 
@@ -960,8 +962,8 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 
 			// 速度测试
 			if config.GlobalConfig.SpeedTestUrl != "" {
-				speed, _, err := checker.CheckSpeed(ctx, client.Client, checker.Bucket, client.BytesRead)
-				if err != nil || speed < config.GlobalConfig.MinSpeed {
+				metrics, err := checker.CheckSpeed(ctx, client.Client, client.BytesRead)
+				if err != nil || metrics.SpeedKBps < config.GlobalConfig.MinSpeed {
 					failedCount.Add(1)
 					return
 				}

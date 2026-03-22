@@ -835,6 +835,18 @@
                         }
                     }
                 }
+
+                const currentStageStats = detailStats.stageStats?.[
+                    detailStats.currentStage === 0 ? 'alive' : detailStats.currentStage === 1 ? 'speed' : 'media'
+                ];
+                if (currentStageStats) {
+                    if (currentStageStats.successRate !== undefined && currentStageStats.done > 0) {
+                        text += ` | 阶段成功率=${currentStageStats.successRate}%`;
+                    }
+                    if (currentStageStats.timeoutRate !== undefined && currentStageStats.done > 0) {
+                        text += ` | 阶段超时率=${currentStageStats.timeoutRate}%`;
+                    }
+                }
                 
                 // 显示超时倒计时
                 if (detailStats.timeoutRemaining !== undefined && detailStats.timeoutRemaining > 0) {

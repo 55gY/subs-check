@@ -102,6 +102,10 @@ filters:
 
 # 是否开启流媒体检测，其中IP欺诈依赖重命名
 media-check: true
+# 仅当 media-check: true 时，platforms 才会生效。
+# platforms 按顺序执行；更常用或更想优先看到的检测可以放前面。
+# 如果依赖 filters 过滤国家，建议保留 iprisk，且尽量靠前，便于尽早拿到 Country/IPRisk 信息。
+# 请尽量避免重复配置同一平台，保持配置更直观。
 platforms:
   - gemini
   - openai

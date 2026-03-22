@@ -2,6 +2,7 @@ package checker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,9 +12,23 @@ import (
 	"log/slog"
 
 	"github.com/55gY/subs-check/config"
-	"github.com/juju/ratelimit"
 	"github.com/metacubex/mihomo/common/convert"
 )
+
+const minEffectiveSpeedDuration = 120 * time.Millisecond
+
+type SpeedCheckMetrics struct {
+	SpeedKBps          int
+	ActualBytes        int64
+	TotalDuration      time.Duration
+	ResponseWait       time.Duration
+	DownloadDuration   time.Duration
+	SampleDuration     time.Duration
+	LowConfidence      bool
+	SampleTooSmall     bool
+	ContextCanceled    bool
+	ResponseStatusCode int
+}
 
 // networkLimitedReader 基于网络层字节计数器的大小限制 reader
 type networkLimitedReader struct {
@@ -40,7 +55,8 @@ func (r *networkLimitedReader) Read(p []byte) (n int, err error) {
 	return r.reader.Read(p)
 }
 
-func CheckSpeed(ctx context.Context, httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter *uint64) (int, int64, error) {
+func CheckSpeed(ctx context.Context, httpClient *http.Client, bytesCounter *uint64) (SpeedCheckMetrics, error) {
+	metrics := SpeedCheckMetrics{}
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Debug(fmt.Sprintf("CheckSpeed发生panic: %v", r))
@@ -61,22 +77,27 @@ func CheckSpeed(ctx context.Context, httpClient *http.Client, bucket *ratelimit.
 
 	req, err := http.NewRequestWithContext(ctx, "GET", config.GlobalConfig.SpeedTestUrl, nil)
 	if err != nil {
-		return 0, 0, err
+		return metrics, err
 	}
 	req.Header.Set("User-Agent", convert.RandUserAgent())
 
 	// 记录测速前的网络传输字节数
 	var startBytes uint64
 	if bytesCounter != nil {
-		startBytes = *bytesCounter
+		startBytes = atomic.LoadUint64(bytesCounter)
 	}
 	startTime := time.Now()
 
 	resp, err := speedClient.Do(req)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			metrics.ContextCanceled = true
+		}
 		slog.Debug(fmt.Sprintf("测速请求失败: %v", err))
-		return 0, 0, err
+		return metrics, err
 	}
+	metrics.ResponseWait = time.Since(startTime)
+	metrics.ResponseStatusCode = resp.StatusCode
 	defer func() {
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
@@ -100,30 +121,48 @@ func CheckSpeed(ctx context.Context, httpClient *http.Client, bucket *ratelimit.
 	}
 
 	// 读取所有数据
+	downloadStart := time.Now()
 	totalBytes, err := io.Copy(io.Discard, limitedReader)
+	metrics.DownloadDuration = time.Since(downloadStart)
 	// io.EOF 是正常的（达到限制），其他错误才需要关注
 	if err != nil && err != io.EOF && totalBytes == 0 {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			metrics.ContextCanceled = true
+		}
 		slog.Debug(fmt.Sprintf("totalBytes: %d, 读取数据时发生错误: %v", totalBytes, err))
-		return 0, 0, err
+		return metrics, err
 	}
 
-	// 计算下载时间（毫秒）
-	duration := time.Since(startTime).Milliseconds()
-	if duration == 0 {
-		duration = 1 // 避免除以零
+	metrics.TotalDuration = time.Since(startTime)
+	metrics.SampleDuration = metrics.DownloadDuration
+	if metrics.SampleDuration <= 0 {
+		metrics.SampleDuration = metrics.TotalDuration
 	}
 
 	// 计算实际网络传输的字节数（压缩数据）
 	var actualBytes int64
 	if bytesCounter != nil {
-		actualBytes = int64(*bytesCounter - startBytes)
+		actualBytes = int64(atomic.LoadUint64(bytesCounter) - startBytes)
 	} else {
 		// 如果没有字节计数器，无法获取准确数据
 		actualBytes = 0
 	}
+	metrics.ActualBytes = actualBytes
+
+	if actualBytes <= 32*1024 || totalBytes <= 32*1024 {
+		metrics.SampleTooSmall = true
+	}
+	if metrics.SampleDuration < minEffectiveSpeedDuration {
+		metrics.LowConfidence = true
+	}
+
+	durationMs := metrics.SampleDuration.Milliseconds()
+	if durationMs <= 0 {
+		durationMs = 1
+	}
 
 	// 计算速度（KB/s），使用实际网络传输的字节数
-	speed := int(float64(actualBytes) / 1024 * 1000 / float64(duration))
+	metrics.SpeedKBps = int(float64(actualBytes) / 1024 * 100 / float64(durationMs))
 
-	return speed, actualBytes, nil
+	return metrics, nil
 }
