@@ -191,12 +191,6 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				speedStatsOverEnd.Add(1)
 			}
 
-			if speed < config.GlobalConfig.MinSpeed {
-				item.Client.Close()
-				tracker.CountSpeedWithDuration(false, metrics.TotalDuration, false)
-				continue
-			}
-
 			item.Speed = speed
 			tracker.CountSpeedWithDuration(true, metrics.TotalDuration, false)
 

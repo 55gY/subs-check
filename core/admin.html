@@ -776,11 +776,12 @@
             }
             
             // 更新成功数
+            const taskSuccess = detailStats?.currentStageSuccess ?? available ?? 0;
             const successCount = document.getElementById('successCount');
-            if (available > 0) {
-                successCount.innerHTML = `<span class="success-highlight">${available}</span>`;
+            if (taskSuccess > 0) {
+                successCount.innerHTML = `<span class="success-highlight">${taskSuccess}</span>`;
             } else {
-                successCount.textContent = available;
+                successCount.textContent = taskSuccess;
             }
             
             // 更新失败数(使用后端返回的值)

@@ -49,7 +49,7 @@ func (app *App) loadConfig() error {
 		seenUrls := make(map[string]bool)
 		var uniqueUrls []string
 		duplicateCount := 0
-		
+
 		for _, url := range config.GlobalConfig.SubUrls {
 			if !seenUrls[url] {
 				seenUrls[url] = true
@@ -58,12 +58,12 @@ func (app *App) loadConfig() error {
 				duplicateCount++
 			}
 		}
-		
+
 		// 如果发现重复项，更新配置并保存
 		if duplicateCount > 0 {
 			slog.Warn(fmt.Sprintf("配置中发现 %d 个重复订阅链接，已自动去除", duplicateCount))
 			config.GlobalConfig.SubUrls = uniqueUrls
-			
+
 			// 调用去重函数清理配置文件
 			if err := config.DeduplicateSubUrlsFromConfig(); err != nil {
 				slog.Warn(fmt.Sprintf("自动去重配置文件失败: %v", err))
@@ -76,13 +76,11 @@ func (app *App) loadConfig() error {
 
 	slog.Info("配置文件读取成功",
 		"speed-test-url", config.GlobalConfig.SpeedTestUrl,
-		"min-speed", config.GlobalConfig.MinSpeed,
 		"alive-test-url", config.GlobalConfig.AliveTestUrl)
 
 	// 输出并发配置加载信息
 	if config.GlobalConfig.ConcurrentStage != nil {
 		slog.Info("并发配置加载",
-			"concurrent", config.GlobalConfig.Concurrent,
 			"concurrent-stage.alive", config.GlobalConfig.ConcurrentStage.Alive,
 			"concurrent-stage.speed", config.GlobalConfig.ConcurrentStage.Speed,
 			"concurrent-stage.media", config.GlobalConfig.ConcurrentStage.Media,
@@ -91,8 +89,7 @@ func (app *App) loadConfig() error {
 			"生效-media", config.GlobalConfig.GetMediaConcurrent())
 	} else {
 		slog.Info("并发配置加载",
-			"concurrent", config.GlobalConfig.Concurrent,
-			"concurrent-stage", "未配置(使用旧版配置)",
+			"concurrent-stage", "未配置(使用默认值)",
 			"生效-alive", config.GlobalConfig.GetAliveConcurrent(),
 			"生效-speed", config.GlobalConfig.GetSpeedConcurrent(),
 			"生效-media", config.GlobalConfig.GetMediaConcurrent())

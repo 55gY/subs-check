@@ -17,9 +17,8 @@ type ConcurrentConfig struct {
 
 type Config struct {
 	PrintProgress        bool              `yaml:"print-progress"`
-	Concurrent           int               `yaml:"concurrent"`           // 旧版配置，保持向后兼容
-	ConcurrentStage      *ConcurrentConfig `yaml:"concurrent-stage"`     // 新版分阶段配置
-	Network              int               `yaml:"network"`              // 服务器带宽峰值(MB/s)，用于推导测速并发
+	ConcurrentStage      *ConcurrentConfig `yaml:"concurrent-stage"` // 新版分阶段配置
+	Network              int               `yaml:"network"`          // 服务器带宽峰值(MB/s)，用于推导测速并发
 	CheckInterval        int               `yaml:"check-interval"`
 	CronExpression       string            `yaml:"cron-expression"`
 	AliveTestUrl         string            `yaml:"alive-test-url"`
@@ -27,11 +26,10 @@ type Config struct {
 	DownloadTimeout      int               `yaml:"download-timeout"`
 	DownloadMB           int               `yaml:"download-mb"`
 	TotalSpeedLimit      int               `yaml:"total-speed-limit"`
-	MinSpeed             int               `yaml:"min-speed"`
 	Timeout              int               `yaml:"timeout"`
-	UnifiedDelay         bool              `yaml:"unified-delay"`          // 是否启用统一延迟（两次测试）
-	WarmupTimeout        int               `yaml:"warmup-timeout"`         // 预热阶段超时（秒）
-	TestTimeout          int               `yaml:"test-timeout"`           // 实际测试超时（秒）
+	UnifiedDelay         bool              `yaml:"unified-delay"`  // 是否启用统一延迟（两次测试）
+	WarmupTimeout        int               `yaml:"warmup-timeout"` // 预热阶段超时（秒）
+	TestTimeout          int               `yaml:"test-timeout"`   // 实际测试超时（秒）
 	SubUrlsReTry         int               `yaml:"sub-urls-retry"`
 	SubUrlsRetryInterval int               `yaml:"sub-urls-retry-interval"`
 	SubUrlsTimeout       int               `yaml:"sub-urls-timeout"`
@@ -60,12 +58,12 @@ type Config struct {
 
 var GlobalConfig = &Config{
 	// 新增配置，给未更改配置文件的用户一个默认值
-	ListenPort:  ":8199",
-	NotifyTitle: "🔔 节点状态更新",
-	Platforms:   []string{"openai", "youtube", "netflix", "disney", "gemini"},
-	DownloadMB:  20,
-	AliveTestUrl: "http://gstatic.com/generate_204",
-	SubUrlsGetUA: "clash",
+	ListenPort:          ":8199",
+	NotifyTitle:         "🔔 节点状态更新",
+	Platforms:           []string{"openai", "youtube", "netflix", "disney", "gemini"},
+	DownloadMB:          20,
+	AliveTestUrl:        "http://gstatic.com/generate_204",
+	SubUrlsGetUA:        "clash",
 	SubUrlsRetryFailed:  -1, // 默认永不删除，避免误删用户订阅
 	SubUrlsMinNodeCount: 0,  // 默认不启用节点数量检查
 	Filters:             []string{"CN"},
@@ -80,10 +78,6 @@ func (c *Config) GetAliveConcurrent() int {
 	if c.ConcurrentStage != nil && c.ConcurrentStage.Alive > 0 {
 		return c.ConcurrentStage.Alive
 	}
-	// 向后兼容：使用旧配置
-	if c.Concurrent > 0 {
-		return c.Concurrent
-	}
 	return 100 // 默认值
 }
 
@@ -94,39 +88,13 @@ func (c *Config) GetSpeedConcurrent() int {
 	}
 	// 优先使用带宽峰值自动推导测速并发
 	if c.Network > 0 {
-		// network 单位为 MB/s，min-speed 单位为 KB/s。
-		// 采用“总带宽 / 最低有效测速”的近似值，再乘以 2 倍安全系数，
-		// 兼顾慢节点并发和测速结果稳定性。
-		if c.MinSpeed > 0 {
-			conc := (c.Network * 1024) / c.MinSpeed
-			if conc < 1 {
-				conc = 1
-			}
-			conc *= 2
-			if conc < 8 {
-				conc = 8
-			}
-			if conc > 64 {
-				conc = 64
-			}
-			return conc
-		}
-
-		// 未配置 min-speed 时，按每个测速任务至少分配约 1MB/s 估算。
+		// 未显式配置测速并发时，按每个测速任务至少分配约 1MB/s 估算。
 		conc := c.Network
 		if conc < 1 {
 			conc = 1
 		}
 		if conc > 64 {
 			conc = 64
-		}
-		return conc
-	}
-	// 向后兼容：使用旧配置的 40%
-	if c.Concurrent > 0 {
-		conc := int(float64(c.Concurrent) * 0.4)
-		if conc < 1 {
-			conc = 1
 		}
 		return conc
 	}
@@ -137,14 +105,6 @@ func (c *Config) GetSpeedConcurrent() int {
 func (c *Config) GetMediaConcurrent() int {
 	if c.ConcurrentStage != nil && c.ConcurrentStage.Media > 0 {
 		return c.ConcurrentStage.Media
-	}
-	// 向后兼容：使用旧配置的 20%
-	if c.Concurrent > 0 {
-		conc := int(float64(c.Concurrent) * 0.2)
-		if conc < 1 {
-			conc = 1
-		}
-		return conc
 	}
 	return 20 // 默认值
 }
@@ -191,7 +151,7 @@ func DeduplicateSubUrls(configPath string) error {
 						urlPart := strings.TrimSpace(line[i+1:])
 						// 去掉可能的引号
 						urlPart = strings.Trim(urlPart, `"'`)
-						
+
 						// 检查是否重复
 						if seenUrls[urlPart] {
 							// 重复的URL，跳过这一行

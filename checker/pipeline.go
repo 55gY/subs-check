@@ -156,7 +156,6 @@ func Check() ([]Result, error) {
 		"存活检测", true,
 		"测速检测", speedON,
 		"媒体检测", mediaON,
-		"最低速度(KB/s)", config.GlobalConfig.MinSpeed,
 		"测速URL", config.GlobalConfig.SpeedTestUrl)
 
 	if !speedON && !mediaON {
@@ -208,7 +207,7 @@ func Check() ([]Result, error) {
 
 	slog.Info("======== 阶段1: 存活检测 ========")
 	slog.Info("启动存活检测", "总节点数", len(proxies), "并发数", aliveConc)
-	slog.Info("检测参数", "speed_enabled", speedON, "media_enabled", mediaON, "min_speed_kb", config.GlobalConfig.MinSpeed)
+	slog.Info("检测参数", "speed_enabled", speedON, "media_enabled", mediaON)
 
 	// 为阶段1创建独立的 context，确保资源隔离
 	aliveCtx, aliveCancel := context.WithCancel(context.Background())
@@ -393,15 +392,11 @@ func Check() ([]Result, error) {
 		if networkKB <= 0 {
 			networkKB = 20 * 1024
 		}
-		if config.GlobalConfig.MinSpeed > 0 {
-			// min-speed 单位为 KB/s；按 1MB/s≈1024KB/s 的粗略下限估计，
-			// 将并发限制在一个更可控的范围内。
-			estimatedByMinSpeed := networkKB / config.GlobalConfig.MinSpeed
-			if estimatedByMinSpeed > 0 && estimatedByMinSpeed < safeCap {
-				safeCap = estimatedByMinSpeed * 2
-				if safeCap < 8 {
-					safeCap = 8
-				}
+		estimatedByNetwork := networkKB / 1024
+		if estimatedByNetwork > 0 && estimatedByNetwork < safeCap {
+			safeCap = estimatedByNetwork * 2
+			if safeCap < 8 {
+				safeCap = 8
 			}
 		}
 		if speedConc > safeCap {

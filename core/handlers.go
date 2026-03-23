@@ -957,7 +957,7 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 	defer cancel()
 
 	// 并发控制
-	concurrent := config.GlobalConfig.Concurrent
+	concurrent := config.GlobalConfig.GetAliveConcurrent()
 	if concurrent <= 0 {
 		concurrent = 5
 	}
@@ -1025,8 +1025,8 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 
 			// 速度测试
 			if config.GlobalConfig.SpeedTestUrl != "" {
-				metrics, err := checker.CheckSpeed(ctx, client.Client, client.BytesRead)
-				if err != nil || metrics.SpeedKBps < config.GlobalConfig.MinSpeed {
+				_, err := checker.CheckSpeed(ctx, client.Client, client.BytesRead)
+				if err != nil {
 					failedCount.Add(1)
 					return
 				}

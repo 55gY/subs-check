@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -176,10 +177,16 @@ func (db *DB) QueryRecords(testStage int, minSpeed int) ([]DBNodeRecord, error) 
 		return nil, err
 	}
 	if len(records) > 0 {
+		sortRecordsBySpeedDesc(records)
 		return records, nil
 	}
 
-	return db.queryBatch(testStage, minSpeed, BatchPrevious)
+	records, err = db.queryBatch(testStage, minSpeed, BatchPrevious)
+	if err != nil {
+		return nil, err
+	}
+	sortRecordsBySpeedDesc(records)
+	return records, nil
 }
 
 func (db *DB) queryBatch(testStage int, minSpeed int, batch int) ([]DBNodeRecord, error) {
@@ -223,4 +230,13 @@ func itob(v uint64) []byte {
 		v >>= 8
 	}
 	return b
+}
+
+func sortRecordsBySpeedDesc(records []DBNodeRecord) {
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].SpeedKBps == records[j].SpeedKBps {
+			return records[i].ID < records[j].ID
+		}
+		return records[i].SpeedKBps > records[j].SpeedKBps
+	})
 }
