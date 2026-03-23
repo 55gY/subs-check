@@ -212,7 +212,8 @@ sub-urls:
     # - https://raw.githubusercontent.com/example/repo/main/daily/daily-{Y}-{m}-{d}.yaml
     # - https://example.com/sub.txt#我是备注我是备注
     # 打开这个就可以把上次可用的节点再次测一次
-  - "http://127.0.0.1:8199/sub/all.yaml"
+  # 本地接口默认返回 test=2 的结果，可按需追加 ?test=0|1|2 或 &speed=100
+  - http://127.0.0.1:8199/sub
   - https://gist.githubusercontent.com/shaoyouvip/9dc3d23482fdc4a19e407a7e944782b8/raw/base64.txt#shaoyouvip
   - https://cdn.z.wiki/autoupload/20250401/BVfz/%E6%96%87%E6%9C%AC.txt#stymei1
   - https://app.nextvpn.xyz/api/sub/c0ea398d509d1536367199a64cd5828101f975eb

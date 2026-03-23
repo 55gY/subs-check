@@ -19,6 +19,10 @@ import (
 
 // Result 存储节点检测结果
 type Result struct {
+	RecordID  uint64
+	TestStage int
+	SpeedKBps int
+	Batch     int
 	Proxy     map[string]any
 	Openai    bool
 	OpenaiWeb bool
@@ -37,6 +41,7 @@ type PipelineItem struct {
 	ProxyMap map[string]any
 	Client   *ProxyClient
 	Result   *Result
+	RecordID uint64
 	Speed    int
 }
 
@@ -537,13 +542,21 @@ func Check() ([]Result, error) {
 				"阶段总量", speedSentCount.Load(),
 				"阶段完成", tracker.speedDone.Load(),
 				"阶段通过", tracker.speedSuccess.Load())
+			speedBucketTotal := speedStatsUnder10.Load() +
+				speedStatsUnder50.Load() +
+				speedStatsUnder100.Load() +
+				speedStatsUnder500.Load() +
+				speedStatsUnder1000.Load() +
+				speedStatsOverEnd.Load()
 			slog.Info("测速统计",
+				"统计方式", "互斥区间",
+				"分桶总计", speedBucketTotal,
 				"<10KB/s", speedStatsUnder10.Load(),
 				"10-50KB/s", speedStatsUnder50.Load(),
 				"50-100KB/s", speedStatsUnder100.Load(),
 				"100-500KB/s", speedStatsUnder500.Load(),
 				"500-1000KB/s", speedStatsUnder1000.Load(),
-				">=1000KB/s", speedStatsOver1000.Load())
+				">=1000KB/s", speedStatsOverEnd.Load())
 			if mediaON {
 				close(mediaChan)
 				return

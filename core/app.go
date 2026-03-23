@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,17 +23,17 @@ import (
 
 // App 结构体用于管理应用程序状态
 type App struct {
-	configPath    string
-	interval      int
-	watcher       *fsnotify.Watcher
-	checkChan     chan struct{} // 触发检测的通道
-	checking      atomic.Bool   // 检测状态标志
-	allYamlMutex  sync.Mutex    // 保护 all.yaml 文件的读写
-	configMutex   sync.Mutex    // 保护 config.yaml 文件的读写
-	ticker        *time.Ticker
-	done          chan struct{} // 用于结束ticker goroutine的信号
-	cron          *cron.Cron    // crontab调度器
-	version       string
+	configPath   string
+	interval     int
+	watcher      *fsnotify.Watcher
+	checkChan    chan struct{} // 触发检测的通道
+	checking     atomic.Bool   // 检测状态标志
+	allYamlMutex sync.Mutex    // 保护 all.yaml 文件的读写
+	configMutex  sync.Mutex    // 保护 config.yaml 文件的读写
+	ticker       *time.Ticker
+	done         chan struct{} // 用于结束ticker goroutine的信号
+	cron         *cron.Cron    // crontab调度器
+	version      string
 }
 
 // New 创建新的应用实例
@@ -226,6 +227,10 @@ func (app *App) checkProxies() error {
 		return fmt.Errorf("检测代理失败: %w", err)
 	}
 
+	if err := persistResults(results); err != nil {
+		return fmt.Errorf("持久化检测结果失败: %w", err)
+	}
+
 	slog.Info("检测完成")
 	output.SaveConfig(results)
 	util.SendNotify(
@@ -237,6 +242,61 @@ func (app *App) checkProxies() error {
 	)
 
 	return nil
+}
+
+func persistResults(results []checker.Result) error {
+	if len(results) == 0 {
+		return nil
+	}
+
+	db, err := output.GetDB()
+	if err != nil {
+		return err
+	}
+
+	hasSpeedStage := strings.TrimSpace(config.GlobalConfig.SpeedTestUrl) != ""
+	records := make([]output.DBNodeRecord, 0, len(results))
+	for i := range results {
+		testStage := output.TestAlive
+		if hasMediaData(results[i]) {
+			testStage = output.TestMedia
+		} else if hasSpeedStage {
+			testStage = output.TestSpeed
+		}
+
+		results[i].Batch = output.BatchCurrent
+		results[i].TestStage = testStage
+		records = append(records, output.DBNodeRecord{
+			Batch:     output.BatchCurrent,
+			TestStage: testStage,
+			SpeedKBps: results[i].SpeedKBps,
+			Proxy:     results[i].Proxy,
+			Openai:    results[i].Openai,
+			OpenaiWeb: results[i].OpenaiWeb,
+			Youtube:   results[i].Youtube,
+			Netflix:   results[i].Netflix,
+			Google:    results[i].Google,
+			Disney:    results[i].Disney,
+			Gemini:    results[i].Gemini,
+			TikTok:    results[i].TikTok,
+			IP:        results[i].IP,
+			IPRisk:    results[i].IPRisk,
+			Country:   results[i].Country,
+		})
+	}
+
+	return db.ReplaceCurrentBatch(records)
+}
+
+func hasMediaData(result checker.Result) bool {
+	return result.Openai ||
+		result.OpenaiWeb ||
+		len(strings.TrimSpace(result.Youtube)) > 0 ||
+		result.Netflix ||
+		result.Disney ||
+		result.Gemini ||
+		len(strings.TrimSpace(result.TikTok)) > 0 ||
+		len(strings.TrimSpace(result.IPRisk)) > 0
 }
 
 func TempLog() string {

@@ -30,6 +30,7 @@ func (app *App) initHttpServer() error {
 
 	// 静态文件路由 - 订阅服务
 	router.StaticFile("/all.yaml", saver.OutputPath+"/all.yaml")
+	router.GET("/sub", app.getSubscription)
 	router.Static("/sub/", saver.OutputPath)
 
 	// 根据配置决定是否启用Web控制面板
@@ -75,7 +76,7 @@ func (app *App) initHttpServer() error {
 				scheme = "https"
 			}
 			host := c.Request.Host
-			subpath := fmt.Sprintf("%s://%s/sub/all.yaml", scheme, host)
+			subpath := fmt.Sprintf("%s://%s/sub", scheme, host)
 
 			c.HTML(http.StatusOK, "admin.html", gin.H{
 				"configPath": app.configPath,

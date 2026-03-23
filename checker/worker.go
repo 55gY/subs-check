@@ -26,7 +26,7 @@ var (
 	speedStatsUnder100  atomic.Int32
 	speedStatsUnder500  atomic.Int32
 	speedStatsUnder1000 atomic.Int32
-	speedStatsOver1000  atomic.Int32
+	speedStatsOverEnd   atomic.Int32
 	receivedCounter     atomic.Int32
 )
 
@@ -175,19 +175,20 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				continue
 			}
 			speed := metrics.SpeedKBps
-			// 统计速度区间 - 使用全局 atomic 计数器
-			if speed < 10 {
+			// 统计互斥速度区间 - 使用全局 atomic 计数器
+			switch {
+			case speed < 10:
 				speedStatsUnder10.Add(1)
-			} else if speed < 50 {
+			case speed < 50:
 				speedStatsUnder50.Add(1)
-			} else if speed < 100 {
+			case speed < 100:
 				speedStatsUnder100.Add(1)
-			} else if speed < 500 {
+			case speed < 500:
 				speedStatsUnder500.Add(1)
-			} else if speed < 1000 {
+			case speed < 1000:
 				speedStatsUnder1000.Add(1)
-			} else {
-				speedStatsOver1000.Add(1)
+			default:
+				speedStatsOverEnd.Add(1)
 			}
 
 			if speed < config.GlobalConfig.MinSpeed {

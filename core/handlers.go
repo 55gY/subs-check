@@ -561,6 +561,69 @@ func (app *App) getVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"version": app.version})
 }
 
+func (app *App) getSubscription(c *gin.Context) {
+	testStage := output.TestMedia
+	if rawTest := strings.TrimSpace(c.Query("test")); len(rawTest) > 0 {
+		parsed, err := strconv.Atoi(rawTest)
+		if err != nil || parsed < output.TestAlive || parsed > output.TestMedia {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "test 仅支持 0、1、2"})
+			return
+		}
+		testStage = parsed
+	}
+
+	minSpeed := 0
+	if rawSpeed := strings.TrimSpace(c.Query("speed")); len(rawSpeed) > 0 {
+		parsed, err := strconv.Atoi(rawSpeed)
+		if err != nil || parsed < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "speed 必须是大于等于 0 的整数，单位 KB/s"})
+			return
+		}
+		minSpeed = parsed
+	}
+	if testStage == output.TestAlive {
+		minSpeed = 0
+	}
+
+	db, err := output.GetDB()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("打开数据库失败: %v", err)})
+		return
+	}
+
+	records, err := db.QueryRecords(testStage, minSpeed)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("查询订阅失败: %v", err)})
+		return
+	}
+	if len(records) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "未找到符合条件的节点"})
+		return
+	}
+
+	proxies := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		if record.Proxy == nil {
+			continue
+		}
+		proxies = append(proxies, record.Proxy)
+	}
+	if len(proxies) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "未找到可输出的节点"})
+		return
+	}
+
+	yamlData, err := yaml.Marshal(map[string]any{"proxies": proxies})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("生成订阅内容失败: %v", err)})
+		return
+	}
+
+	c.Header("Content-Type", "application/yaml; charset=utf-8")
+	c.Header("Content-Disposition", "inline; filename=sub.yaml")
+	c.String(http.StatusOK, string(yamlData))
+}
+
 func ReadLastNLines(filePath string, n int) ([]string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -1254,7 +1317,7 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 
 		// 前 20 个节点名称（检查乱码）
 		if len(proxies) > 0 {
-			f.WriteString(fmt.Sprintf("\n=== 前 20 个节点名称 ===\n"))
+			f.WriteString("\n=== 前 20 个节点名称 ===\n")
 			for i := 0; i < min(20, len(proxies)); i++ {
 				if name, ok := proxies[i]["name"]; ok {
 					f.WriteString(fmt.Sprintf("%d: %v\n", i+1, name))
@@ -1263,12 +1326,12 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 		}
 
 		// 提取的链接信息
-		f.WriteString(fmt.Sprintf("\n=== 最终处理的数据 ===\n"))
+		f.WriteString("\n=== 最终处理的数据 ===\n")
 		f.WriteString(fmt.Sprintf("长度: %d 字节\n", len(data)))
 		f.WriteString(fmt.Sprintf("提取的链接数: %d\n", len(links)))
 
 		if len(links) > 0 {
-			f.WriteString(fmt.Sprintf("\n=== 提取的链接（前10个）===\n"))
+			f.WriteString("\n=== 提取的链接（前10个）===\n")
 			for i, link := range links[:min(10, len(links))] {
 				f.WriteString(fmt.Sprintf("%d: %s\n", i+1, link))
 			}
