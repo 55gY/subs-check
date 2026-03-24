@@ -175,6 +175,7 @@ func speedWorker(ctx context.Context, in <-chan PipelineItem, mediaOut chan<- Pi
 				continue
 			}
 			speed := metrics.SpeedKBps
+			item.Result.SpeedKBps = speed
 			// 统计互斥速度区间 - 使用全局 atomic 计数器
 			switch {
 			case speed < 10:
