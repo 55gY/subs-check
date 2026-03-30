@@ -479,18 +479,14 @@ func (app *App) getStatus(c *gin.Context) {
 		available = checker.Available.Load()
 		stage = "nodetest"
 		if checker.CurrentTracker != nil {
-			_, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone := checker.CurrentTracker.GetStats()
-			_ = mediaDone
-			failed = (aliveDone - aliveSuccess) + (speedDone - speedSuccess)
+			// 只取当前阶段的失败数，避免跨阶段累计（如测活失败叠加到测速失败）。
+			_, _, currentStageDone, currentStageSuccess, _ := checker.CurrentTracker.GetStageInfo()
+			failed = currentStageDone - currentStageSuccess
 			if failed < 0 {
 				failed = 0
 			}
 		} else {
-			// 回退逻辑：没有详细追踪器时保守使用总进度估算。
-			failed = int32(checker.Progress.Load()) - int32(available)
-			if failed < 0 {
-				failed = 0
-			}
+			failed = 0
 		}
 	}
 

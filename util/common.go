@@ -26,18 +26,30 @@ func GetExecutablePath() string {
 func SetupSignalHandler(forceClose *atomic.Bool) {
 	slog.Debug("设置信号处理器")
 
-	// 监听 SIGHUP (类似 Nginx 的 HUB 信号)
-	hubSigChan := make(chan os.Signal, 1)
-	signal.Notify(hubSigChan, syscall.SIGHUP)
+	// 监听 SIGHUP / SIGINT / SIGTERM
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
-	// 处理 HUB 信号
+	var exitRequested atomic.Bool
+
 	go func() {
-		for sig := range hubSigChan {
-			slog.Debug(fmt.Sprintf("收到 HUB 信号: %s", sig))
-
-			// HUB 信号只设置 ForceClose，不退出程序
-			forceClose.Store(true)
-			slog.Debug("HUB 模式: 已设置强制关闭标志，任务将自动结束，程序继续运行")
+		for sig := range sigChan {
+			switch sig {
+			case syscall.SIGHUP:
+				slog.Debug(fmt.Sprintf("收到 HUB 信号: %s", sig))
+				forceClose.Store(true)
+				slog.Debug("HUB 模式: 已设置强制关闭标志，任务将自动结束，程序继续运行")
+			case syscall.SIGINT, syscall.SIGTERM:
+				if exitRequested.CompareAndSwap(false, true) {
+					slog.Warn("收到退出信号，已设置强制关闭标志；再次发送将立即退出")
+					forceClose.Store(true)
+					continue
+				}
+				slog.Error("再次收到退出信号，程序立即退出")
+				os.Exit(1)
+			default:
+				slog.Warn(fmt.Sprintf("收到未处理信号: %s", sig))
+			}
 		}
 	}()
 }

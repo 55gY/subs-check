@@ -172,8 +172,8 @@ func Check() ([]Result, error) {
 	// 6. 启动 Pipeline
 	// 阶段通道容量使用各阶段实际并发数，避免继续依赖旧版 concurrent 配置。
 	aliveChanCap := config.GlobalConfig.GetAliveConcurrent()
-	if aliveChanCap > 300 {
-		aliveChanCap = 300
+	if aliveChanCap > 1000 {
+		aliveChanCap = 1000
 	}
 	if aliveChanCap < 1 {
 		aliveChanCap = 1
@@ -198,8 +198,8 @@ func Check() ([]Result, error) {
 
 	// 阶段1：存活检测 - 使用配置的存活检测并发数
 	aliveConc := config.GlobalConfig.GetAliveConcurrent()
-	if aliveConc > 300 {
-		aliveConc = 300 // 硬性上限
+	if aliveConc > 1000 {
+		aliveConc = 1000 // 硬性上限
 	}
 	if aliveConc < 1 {
 		aliveConc = 1
@@ -419,14 +419,14 @@ func Check() ([]Result, error) {
 	// 在不限总带宽的情况下，测速阶段容易因下载堆积放大资源压力。
 	// 使用更保守的保护上限，避免阶段2出现极端拥塞和连接堆积。
 	if speedON && config.GlobalConfig.TotalSpeedLimit == 0 {
-		safeCap := 64
+		safeCap := 100
 		networkKB := config.GlobalConfig.Network * 1024
 		if networkKB <= 0 {
 			networkKB = 20 * 1024
 		}
-		estimatedByNetwork := networkKB / 1024
+		estimatedByNetwork := networkKB * 1024 / 300 // 按每任务 300KB/s 推导
 		if estimatedByNetwork > 0 && estimatedByNetwork < safeCap {
-			safeCap = estimatedByNetwork * 2
+			safeCap = estimatedByNetwork
 			if safeCap < 8 {
 				safeCap = 8
 			}

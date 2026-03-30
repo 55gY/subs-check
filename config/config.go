@@ -88,13 +88,13 @@ func (c *Config) GetSpeedConcurrent() int {
 	}
 	// 优先使用带宽峰值自动推导测速并发
 	if c.Network > 0 {
-		// 未显式配置测速并发时，按每个测速任务至少分配约 1MB/s 估算。
-		conc := c.Network
+		// 未显式配置测速并发时，按每个测速任务至少分配约 300KB/s 估算。
+		conc := c.Network * 1024 / 300
 		if conc < 1 {
 			conc = 1
 		}
-		if conc > 64 {
-			conc = 64
+		if conc > 100 {
+			conc = 100
 		}
 		return conc
 	}
