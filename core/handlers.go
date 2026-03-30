@@ -463,12 +463,17 @@ func (app *App) getStatus(c *gin.Context) {
 	var available uint32
 	var failed int32
 	var stage string // "subscription" 或 "nodetest"
+	currentStageCode := "idle"
+	currentStageName := "空闲"
+	statusText := "空闲"
 
 	if subsTotal > 0 && subsProgress < subsTotal {
 		// 订阅获取阶段:显示成功获取的订阅数
 		available = uint32(proxyutils.SubsFetchSuccess.Load())
 		failed = proxyutils.SubsFetchFailed.Load()
 		stage = "subscription"
+		currentStageCode = "subscription"
+		currentStageName = "订阅获取"
 	} else {
 		// 节点检测阶段:显示可用节点数
 		available = checker.Available.Load()
@@ -489,24 +494,50 @@ func (app *App) getStatus(c *gin.Context) {
 		}
 	}
 
+	if app.checking.Load() {
+		statusText = "检测中"
+		if app.stopping.Load() || checker.ForceClose.Load() {
+			statusText = "停止中"
+		}
+	} else if app.stopping.Load() || checker.ForceClose.Load() {
+		statusText = "停止中"
+	}
+
 	response := gin.H{
 		"checking":   app.checking.Load(),
+		"stopping":   app.stopping.Load() || checker.ForceClose.Load(),
 		"proxyCount": checker.ProxyCount.Load(),
 		"available":  available,
 		"progress":   checker.Progress.Load(),
 		"progressPercent": func() float64 {
 			return float64(checker.Progress.Load()) / 100
 		}(),
-		"failed": failed,
-		"stage":  stage,
+		"failed":           failed,
+		"stage":            stage,
+		"statusText":       statusText,
+		"currentStageCode": currentStageCode,
+		"currentStageName": currentStageName,
 	}
 
 	// 添加详细统计信息
 	if checker.CurrentTracker != nil {
 		totalNodes, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone := checker.CurrentTracker.GetStats()
-		currentStage, currentStageName, currentStageDone, currentStageSuccess, currentStageTotal := checker.CurrentTracker.GetStageInfo()
+		currentStage, trackerStageName, currentStageDone, currentStageSuccess, currentStageTotal := checker.CurrentTracker.GetStageInfo()
 		timeoutRemaining := checker.CurrentTracker.GetTimeoutRemaining()
 		detailedStats := checker.CurrentTracker.GetDetailedStats()
+
+		currentStageName = trackerStageName
+		switch currentStage {
+		case 0:
+			currentStageCode = "alive"
+		case 1:
+			currentStageCode = "speed"
+		case 2:
+			currentStageCode = "media"
+		default:
+			currentStageCode = "idle"
+		}
+
 		response["detailStats"] = gin.H{
 			"totalNodes":          totalNodes,
 			"aliveSuccess":        aliveSuccess,
@@ -522,6 +553,8 @@ func (app *App) getStatus(c *gin.Context) {
 			"timeoutRemaining":    timeoutRemaining, // 超时倒计时（秒）
 			"stageStats":          detailedStats,
 		}
+		response["currentStageCode"] = currentStageCode
+		response["currentStageName"] = currentStageName
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -535,8 +568,9 @@ func (app *App) triggerCheckHandler(c *gin.Context) {
 
 // forceCloseHandler 强制关闭
 func (app *App) forceCloseHandler(c *gin.Context) {
+	app.MarkStopping()
 	checker.ForceClose.Store(true)
-	c.JSON(http.StatusOK, gin.H{"message": "已强制关闭"})
+	c.JSON(http.StatusOK, gin.H{"message": "已强制停止"})
 }
 
 // getLogs 获取最近日志

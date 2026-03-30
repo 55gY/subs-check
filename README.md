@@ -105,6 +105,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/55gY/subs-check/HEAD/subs-chec
 - 提供订阅接口、状态接口和配置管理接口
 - 支持通过 `POST /api/config/add` 动态添加订阅链接或节点
 - 支持动态订阅筛选输出与当前批次/上次批次回退
+- 状态接口与 Web 面板支持展示当前阶段，以及“空闲 / 检测中 / 停止中”运行态
 
 详细接口说明见 [API_CHANGES.md](API_CHANGES.md)。
 
@@ -157,6 +158,8 @@ curl -X POST -H "X-API-Key: YOUR_API_KEY" \
 # 获取运行状态
 curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8199/api/status
 ```
+
+状态接口会返回当前运行态、当前阶段和进度统计；当任务收到停止信号后，会短暂显示为“停止中”。
 
 更完整的接口说明、参数、响应示例与动态订阅说明，详见 [API_CHANGES.md](API_CHANGES.md)。
 

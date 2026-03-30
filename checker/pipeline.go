@@ -250,7 +250,16 @@ func Check() ([]Result, error) {
 	go func() {
 		sentCount := 0
 		for _, p := range proxies {
-			aliveChan <- PipelineItem{ProxyMap: p}
+			select {
+			case <-aliveCtx.Done():
+				slog.Warn("存活检测任务发送提前停止",
+					"已发送", sentCount,
+					"总数", len(proxies),
+					"原因", "阶段1 context 已取消")
+				close(aliveChan)
+				return
+			case aliveChan <- PipelineItem{ProxyMap: p}:
+			}
 			sentCount++
 		}
 		close(aliveChan)
@@ -362,6 +371,29 @@ func Check() ([]Result, error) {
 	var speedMediaCancel context.CancelFunc
 	var speedChan chan PipelineItem
 	var mediaChan chan PipelineItem
+	forceCloseWatcherDone := make(chan struct{})
+	defer close(forceCloseWatcherDone)
+
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-forceCloseWatcherDone:
+				return
+			case <-ticker.C:
+				if !ForceClose.Load() {
+					continue
+				}
+				slog.Warn("检测到强制停止标志，开始取消检测阶段上下文")
+				aliveCancel()
+				if speedMediaCancel != nil {
+					speedMediaCancel()
+				}
+				return
+			}
+		}
+	}()
 
 	// 如果没有存活节点或者不需要测速和媒体，直接返回
 	if len(aliveResults) == 0 || (!speedON && !mediaON) {
@@ -476,13 +508,31 @@ func Check() ([]Result, error) {
 
 			for _, item := range newNodes {
 				if speedON {
-					speedChan <- item
+					select {
+					case <-speedMediaCtx.Done():
+						slog.Warn("后续阶段任务发送提前停止",
+							"目标阶段", "测速",
+							"累计已发送", lastSentCount,
+							"待发送剩余", len(newNodes),
+							"原因", "阶段2/3 context 已取消")
+						return false
+					case speedChan <- item:
+					}
 				} else if mediaON {
-					mediaChan <- item
+					select {
+					case <-speedMediaCtx.Done():
+						slog.Warn("后续阶段任务发送提前停止",
+							"目标阶段", "媒体",
+							"累计已发送", lastSentCount,
+							"待发送剩余", len(newNodes),
+							"原因", "阶段2/3 context 已取消")
+						return false
+					case mediaChan <- item:
+					}
 				}
+				lastSentCount++
 			}
-			lastSentCount = currentLen
-			speedSentCount.Store(int32(currentLen))
+			speedSentCount.Store(int32(lastSentCount))
 			targetStage := "测速"
 			if !speedON && mediaON {
 				targetStage = "媒体"
@@ -490,7 +540,7 @@ func Check() ([]Result, error) {
 			slog.Info("发送存活节点到后续流水线",
 				"目标阶段", targetStage,
 				"本次数量", len(newNodes),
-				"累计已发送", currentLen,
+				"累计已发送", lastSentCount,
 				"总存活", tracker.aliveSuccess.Load())
 			return true
 		}
@@ -556,6 +606,8 @@ func Check() ([]Result, error) {
 				close(mediaChan)
 				return
 			}
+		} else if mediaON {
+			return
 		}
 		close(resultChan)
 	}()

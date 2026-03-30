@@ -28,6 +28,7 @@ type App struct {
 	watcher      *fsnotify.Watcher
 	checkChan    chan struct{} // 触发检测的通道
 	checking     atomic.Bool   // 检测状态标志
+	stopping     atomic.Bool   // 停止中状态标志
 	allYamlMutex sync.Mutex    // 保护 all.yaml 文件的读写
 	configMutex  sync.Mutex    // 保护 config.yaml 文件的读写
 	ticker       *time.Ticker
@@ -194,7 +195,11 @@ func (app *App) triggerCheck() {
 		slog.Warn("已有检测正在进行，跳过本次检测")
 		return
 	}
-	defer app.checking.Store(false)
+	app.stopping.Store(false)
+	defer func() {
+		app.checking.Store(false)
+		app.stopping.Store(false)
+	}()
 
 	if err := app.checkProxies(); err != nil {
 		slog.Error(fmt.Sprintf("检测代理失败: %v", err))
@@ -216,6 +221,12 @@ func (app *App) triggerCheck() {
 		}
 	}
 	debug.FreeOSMemory()
+}
+
+func (app *App) MarkStopping() {
+	if app.checking.Load() {
+		app.stopping.Store(true)
+	}
 }
 
 // checkProxies 执行代理检测
