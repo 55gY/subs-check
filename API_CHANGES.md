@@ -1,5 +1,29 @@
 # API 调整说明
 
+## 🔄 修复订阅阶段状态被旧阶段覆盖 - 2026年4月10日
+
+### 功能概述
+
+修复了 `/api/status` 在“订阅获取”阶段可能错误返回 `媒体检测` 的问题。该问题由上一轮检测残留的 `CurrentTracker` 阶段信息覆盖扁平阶段字段导致，进而使 Web 面板顶部状态出现“当前阶段=媒体检测，但总进度=0%”的错位显示。
+
+### 调整内容
+
+1. 当处于订阅获取阶段（`stage=subscription`）时，`currentStageCode/currentStageName` 不再被 tracker 阶段覆盖。
+2. 保持订阅阶段扁平字段语义稳定：`currentStageCode=subscription`、`currentStageName=订阅获取`。
+3. 每轮检测开始前重置全局 `CurrentTracker`，避免上一轮残留阶段污染新任务初始状态。
+
+### 兼容性说明
+
+1. 原有字段结构不变，未新增或删除接口字段。
+2. `detailStats` 仍保持兼容返回；本次仅修正扁平阶段字段优先级。
+
+### 相关代码变更
+
+- `core/handlers.go`:
+   - `/api/status` 在订阅阶段保留 `subscription/订阅获取`，不再覆写为 tracker 阶段
+- `checker/pipeline.go`:
+   - `Check()` 启动时重置 `CurrentTracker`
+
 ## 🔄 运行状态接口补充停止态与当前阶段字段 - 2026年3月29日
 
 ### 功能概述

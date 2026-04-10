@@ -522,16 +522,18 @@ func (app *App) getStatus(c *gin.Context) {
 		timeoutRemaining := checker.CurrentTracker.GetTimeoutRemaining()
 		detailedStats := checker.CurrentTracker.GetDetailedStats()
 
-		currentStageName = trackerStageName
-		switch currentStage {
-		case 0:
-			currentStageCode = "alive"
-		case 1:
-			currentStageCode = "speed"
-		case 2:
-			currentStageCode = "media"
-		default:
-			currentStageCode = "idle"
+		if stage != "subscription" {
+			currentStageName = trackerStageName
+			switch currentStage {
+			case 0:
+				currentStageCode = "alive"
+			case 1:
+				currentStageCode = "speed"
+			case 2:
+				currentStageCode = "media"
+			default:
+				currentStageCode = "idle"
+			}
 		}
 
 		response["detailStats"] = gin.H{

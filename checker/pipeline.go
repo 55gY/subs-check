@@ -63,6 +63,7 @@ var progressWeight ProgressWeight
 func Check() ([]Result, error) {
 	proxyutils.ResetRenameCounter()
 	ForceClose.Store(false)
+	CurrentTracker = nil
 
 	ProxyCount.Store(0)
 	Available.Store(0)
