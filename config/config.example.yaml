@@ -108,6 +108,8 @@ enable-web-ui: true
 # 填写Web控制面板的api-key，如果为空，则自动生成
 # 配置文件为空时，支持使用环境变量设置 API_KEY
 api-key: "123456"
+# 填写订阅地址token，访问/sub时必须携带 ?token=xxxx；为空时保存配置会自动生成
+sub-token: ""
 
 # 填写搭建的apprise API server 地址
 # https://notify.xxxx.us.kg/notify

@@ -3,6 +3,7 @@ package core
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
@@ -55,6 +56,14 @@ func (app *App) updateConfig(c *gin.Context) {
 	if err := yaml.Unmarshal([]byte(req.Content), &yamlData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("YAML格式错误: %v", err)})
 		return
+	}
+
+	message := "配置已更新"
+	if subToken, ok := yamlData["sub-token"].(string); !ok || strings.TrimSpace(subToken) == "" {
+		token := ensureSubToken()
+		req.Content = upsertTopLevelConfigValue(req.Content, "sub-token", token, "api-key")
+		yamlData["sub-token"] = token
+		message = "配置已更新，已自动生成订阅token"
 	}
 
 	// 去除 sub-urls 中的重复项（保留原有格式和注释）
@@ -127,7 +136,41 @@ func (app *App) updateConfig(c *gin.Context) {
 	}
 
 	// 配置文件监听器会自动重新加载配置
-	c.JSON(http.StatusOK, gin.H{"message": "配置已更新"})
+	c.JSON(http.StatusOK, gin.H{"message": message})
+}
+
+func ensureSubToken() string {
+	if token := strings.TrimSpace(config.GlobalConfig.SubToken); token != "" {
+		return token
+	}
+	config.GlobalConfig.SubToken = GenerateSecureToken()
+	return config.GlobalConfig.SubToken
+}
+
+func upsertTopLevelConfigValue(content, key, value, insertAfter string) string {
+	lines := strings.Split(content, "\n")
+	newLine := fmt.Sprintf("%s: %q", key, value)
+	insertAt := -1
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, key+":") {
+			lines[i] = newLine
+			return strings.Join(lines, "\n")
+		}
+		if strings.HasPrefix(trimmed, insertAfter+":") {
+			insertAt = i + 1
+		}
+	}
+
+	if insertAt >= 0 {
+		lines = append(lines[:insertAt], append([]string{newLine}, lines[insertAt:]...)...)
+		return strings.Join(lines, "\n")
+	}
+	if strings.HasSuffix(content, "\n") {
+		return content + newLine + "\n"
+	}
+	return content + "\n" + newLine
 }
 
 // addConfig 添加单个或多个节点到all.yaml，或添加订阅链接到配置
@@ -594,6 +637,11 @@ func (app *App) getVersion(c *gin.Context) {
 }
 
 func (app *App) getSubscription(c *gin.Context) {
+	if !validSubToken(c.Query("token")) {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
 	testStage := output.TestMedia
 	if rawTest := strings.TrimSpace(c.Query("test")); len(rawTest) > 0 {
 		parsed, err := strconv.Atoi(rawTest)
@@ -654,6 +702,15 @@ func (app *App) getSubscription(c *gin.Context) {
 	c.Header("Content-Type", "application/yaml; charset=utf-8")
 	c.Header("Content-Disposition", "inline; filename=sub.yaml")
 	c.String(http.StatusOK, string(yamlData))
+}
+
+func validSubToken(rawToken string) bool {
+	expected := strings.TrimSpace(config.GlobalConfig.SubToken)
+	provided := strings.TrimSpace(rawToken)
+	if expected == "" || provided == "" || len(expected) != len(provided) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
 }
 
 func ReadLastNLines(filePath string, n int) ([]string, error) {

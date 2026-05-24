@@ -1,13 +1,17 @@
 package core
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
 	"embed"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/55gY/subs-check/config"
@@ -26,6 +30,11 @@ func (app *App) initHttpServer() error {
 	saver, err := output.NewLocalSaver()
 	if err != nil {
 		return fmt.Errorf("获取http监听目录失败: %w", err)
+	}
+
+	if strings.TrimSpace(config.GlobalConfig.SubToken) == "" {
+		config.GlobalConfig.SubToken = GenerateSecureToken()
+		slog.Warn("未设置sub-token，已生成一个随机sub-token", "sub-token", config.GlobalConfig.SubToken)
 	}
 
 	// 静态文件路由 - 订阅服务
@@ -76,7 +85,7 @@ func (app *App) initHttpServer() error {
 				scheme = "https"
 			}
 			host := c.Request.Host
-			subpath := fmt.Sprintf("%s://%s/sub", scheme, host)
+			subpath := fmt.Sprintf("%s://%s/sub?token=%s", scheme, host, url.QueryEscape(config.GlobalConfig.SubToken))
 
 			c.HTML(http.StatusOK, "admin.html", gin.H{
 				"configPath": app.configPath,
@@ -114,4 +123,12 @@ func (app *App) authMiddleware(key string) gin.HandlerFunc {
 
 func GenerateSimpleKey() string {
 	return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+}
+
+func GenerateSecureToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }

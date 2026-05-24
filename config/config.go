@@ -50,6 +50,7 @@ type Config struct {
 	Filters              []string          `yaml:"filters"`
 	EnableWebUI          bool              `yaml:"enable-web-ui"`
 	APIKey               string            `yaml:"api-key"`
+	SubToken             string            `yaml:"sub-token"`
 	GithubProxy          string            `yaml:"github-proxy"`
 	Proxy                string            `yaml:"proxy"`
 	SubUrlsRetryFailed   int               `yaml:"sub-urls-retry-failed"`
