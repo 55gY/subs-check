@@ -687,8 +687,10 @@ func (app *App) getSubscription(c *gin.Context) {
 		}
 		minSpeed = parsed
 	}
-	if testStage == output.TestAlive {
-		minSpeed = 0
+
+	// speed>0 时隐含需要测速结果，自动提升 test 阶段
+	if minSpeed > 0 && testStage < output.TestSpeed {
+		testStage = output.TestSpeed
 	}
 
 	records, err := db.QueryRecords(testStage, minSpeed)
