@@ -60,7 +60,9 @@ func (app *App) updateConfig(c *gin.Context) {
 
 	message := "配置已更新"
 	if subToken, ok := yamlData["sub-token"].(string); !ok || strings.TrimSpace(subToken) == "" {
-		token := ensureSubToken()
+		// 提交数据中 sub-token 为空，始终生成新 token（不依赖内存中的旧值）
+		token := GenerateSecureToken()
+		config.GlobalConfig.SubToken = token
 		req.Content = upsertTopLevelConfigValue(req.Content, "sub-token", token, "api-key")
 		yamlData["sub-token"] = token
 		message = "配置已更新，已自动生成订阅token"
@@ -137,14 +139,6 @@ func (app *App) updateConfig(c *gin.Context) {
 
 	// 配置文件监听器会自动重新加载配置
 	c.JSON(http.StatusOK, gin.H{"message": message})
-}
-
-func ensureSubToken() string {
-	if token := strings.TrimSpace(config.GlobalConfig.SubToken); token != "" {
-		return token
-	}
-	config.GlobalConfig.SubToken = GenerateSecureToken()
-	return config.GlobalConfig.SubToken
 }
 
 func upsertTopLevelConfigValue(content, key, value, insertAfter string) string {

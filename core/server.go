@@ -35,6 +35,11 @@ func (app *App) initHttpServer() error {
 	if strings.TrimSpace(config.GlobalConfig.SubToken) == "" {
 		config.GlobalConfig.SubToken = GenerateSecureToken()
 		slog.Warn("未设置sub-token，已生成一个随机sub-token", "sub-token", config.GlobalConfig.SubToken)
+		// 将生成的 token 写回配置文件，避免重启后再次生成
+		if data, err := os.ReadFile(app.configPath); err == nil {
+			updated := upsertTopLevelConfigValue(string(data), "sub-token", config.GlobalConfig.SubToken, "api-key")
+			_ = os.WriteFile(app.configPath, []byte(updated), 0644)
+		}
 	}
 
 	// 订阅服务只保留动态 DB 输出路径。
@@ -48,6 +53,11 @@ func (app *App) initHttpServer() error {
 			} else {
 				config.GlobalConfig.APIKey = GenerateSimpleKey()
 				slog.Warn("未设置api-key，已生成一个随机api-key", "api-key", config.GlobalConfig.APIKey)
+				// 将生成的 key 写回配置文件，避免重启后再次生成
+				if data, err := os.ReadFile(app.configPath); err == nil {
+					updated := upsertTopLevelConfigValue(string(data), "api-key", config.GlobalConfig.APIKey, "enable-web-ui")
+					_ = os.WriteFile(app.configPath, []byte(updated), 0644)
+				}
 			}
 		}
 		slog.Info("启用Web控制面板", "path", "http://ip:port/admin", "api-key", config.GlobalConfig.APIKey)
@@ -57,7 +67,7 @@ func (app *App) initHttpServer() error {
 
 		// API路由
 		api := router.Group("/api")
-		api.Use(app.authMiddleware(config.GlobalConfig.APIKey)) // 添加认证中间件
+		api.Use(app.authMiddleware()) // 添加认证中间件
 		{
 			// 配置相关API
 			api.GET("/ui-info", app.getUIInfo)
@@ -101,7 +111,8 @@ func (app *App) initHttpServer() error {
 }
 
 // authMiddleware API认证中间件
-func (app *App) authMiddleware(key string) gin.HandlerFunc {
+// 每次请求实时读取 config.GlobalConfig.APIKey，支持热更新
+func (app *App) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authKey := authFailureKey("api", c)
 		now := time.Now()
@@ -123,7 +134,7 @@ func (app *App) authMiddleware(key string) gin.HandlerFunc {
 		}
 
 		apiKey := c.GetHeader("X-API-Key")
-		if !constantTimeEqual(apiKey, key) {
+		if !constantTimeEqual(apiKey, config.GlobalConfig.APIKey) {
 			if err := db.RecordAuthFailure(authKey, now, authMaxFailures, authBanDuration); err != nil {
 				slog.Warn("记录API鉴权失败", "error", err)
 			}

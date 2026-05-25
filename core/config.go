@@ -169,10 +169,23 @@ func (app *App) initConfigWatcher() error {
 						slog.Info("配置文件发生变化，正在重新加载")
 						oldCronExpr := config.GlobalConfig.CronExpression
 						oldInterval := app.interval
+						oldProxy := config.GlobalConfig.Proxy
 
 						if err := app.loadConfig(); err != nil {
 							slog.Error(fmt.Sprintf("重新加载配置文件失败: %v", err))
 							return
+						}
+
+						// 热更新代理设置
+						if oldProxy != config.GlobalConfig.Proxy {
+							if config.GlobalConfig.Proxy != "" {
+								os.Setenv("HTTP_PROXY", config.GlobalConfig.Proxy)
+								os.Setenv("HTTPS_PROXY", config.GlobalConfig.Proxy)
+							} else {
+								os.Unsetenv("HTTP_PROXY")
+								os.Unsetenv("HTTPS_PROXY")
+							}
+							slog.Warn("代理设置发生变化", "proxy", config.GlobalConfig.Proxy)
 						}
 
 						// 检查cron表达式或检测间隔是否变化
