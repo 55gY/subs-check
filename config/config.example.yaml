@@ -57,7 +57,7 @@ download-mb: 10
 total-speed-limit: 0
 
 # 监听端口，用于直接返回节点信息，方便订阅转换
-# http://127.0.0.1:8199/all.yaml
+# http://127.0.0.1:8199/sub?token=你的sub-token
 # 注意：为方便小白默认监听0.0.0.0:8199，请自行修改
 # 更新需重启程序
 listen-port: ":8199"
@@ -193,4 +193,4 @@ sub-urls:
   # - https://raw.githubusercontent.com/example/repo/main/daily/daily-{Y}-{m}-{d}.yaml
   # - https://example.com/sub.txt#我是备注我是备注
   # 打开这个就可以把上次可用的节点再次测一次
-  http://127.0.0.1:8199/sub/all.yaml
+  http://127.0.0.1:8199/sub?token=你的sub-token

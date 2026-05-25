@@ -105,8 +105,8 @@ bash <(curl -Ls https://raw.githubusercontent.com/55gY/subs-check/HEAD/subs-chec
 - 提供订阅接口、状态接口和配置管理接口
 - 支持通过 `POST /api/config/add` 动态添加订阅链接或节点
 - 支持动态订阅筛选输出与当前批次/上次批次回退
-- 状态接口与 Web 面板支持展示当前阶段，以及“空闲 / 检测中 / 停止中”运行态
-
+- 状态接口与 Web 面板支持展示当前阶段，以及“空闲 / 检测中 / 停止中”运行态- 订阅接口使用 token 认证，管理接口使用 API Key 认证，失败时返回 404
+- 同一 IP 连续 3 次鉴权失败后封禁 30 天，封禁数据持久化
 详细接口说明见 [API_CHANGES.md](API_CHANGES.md)。
 
 ### 节点命名与过滤
@@ -132,13 +132,10 @@ bash <(curl -Ls https://raw.githubusercontent.com/55gY/subs-check/HEAD/subs-chec
 #### 常用订阅接口
 ```bash
 # 动态订阅（默认返回较高可用等级结果）
-curl http://localhost:8199/sub
+curl "http://localhost:8199/sub?token=YOUR_SUB_TOKEN"
 
 # 按阶段和速度筛选
-curl "http://localhost:8199/sub?test=1&speed=100"
-
-# 旧静态输出仍可访问
-curl http://localhost:8199/sub/all.yaml
+curl "http://localhost:8199/sub?token=YOUR_SUB_TOKEN&test=1&speed=100"
 ```
 
 #### 常用管理接口
@@ -168,6 +165,16 @@ curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8199/api/status
 - 可在配置文件中通过 `api-key` 字段自定义
 - 也可通过环境变量 `API_KEY` 设置
 - 密钥会在启动日志中显示
+
+**订阅 Token 说明：**
+- 订阅地址需携带 `?token=xxx` 参数，对应配置中的 `sub-token`
+- 为空时自动生成随机 token 并写入配置文件
+- Web 面板验证 API Key 后可查看完整订阅地址
+
+**安全机制：**
+- 同一 IP 连续 3 次鉴权失败后封禁 30 天，封禁数据持久化到数据库
+- 所有鉴权失败统一返回 404，不泄露接口信息
+- 详细安全说明见 [API_CHANGES.md](API_CHANGES.md)
 
 ## 性能建议
 

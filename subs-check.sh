@@ -944,7 +944,7 @@ cmd_info() {
     echo ""
     echo -e "${CYAN}--- 访问地址 ---${NC}"
     echo -e "Web 管理: ${BLUE}http://localhost:8199/admin${NC}"
-    echo -e "订阅链接: ${BLUE}http://localhost:8199/sub/all.yaml${NC}"
+    echo -e "订阅链接: ${BLUE}http://localhost:8199/sub?token=你的sub-token${NC}"
     press_any_key
 }
 

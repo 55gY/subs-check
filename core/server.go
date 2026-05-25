@@ -19,6 +19,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	authMaxFailures = 3
+	authBanDuration = 30 * 24 * time.Hour
+)
+
 //go:embed admin.html
 var templateFS embed.FS
 
@@ -27,20 +32,13 @@ func (app *App) initHttpServer() error {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 
-	saver, err := output.NewLocalSaver()
-	if err != nil {
-		return fmt.Errorf("获取http监听目录失败: %w", err)
-	}
-
 	if strings.TrimSpace(config.GlobalConfig.SubToken) == "" {
 		config.GlobalConfig.SubToken = GenerateSecureToken()
 		slog.Warn("未设置sub-token，已生成一个随机sub-token", "sub-token", config.GlobalConfig.SubToken)
 	}
 
-	// 静态文件路由 - 订阅服务
-	router.StaticFile("/all.yaml", saver.OutputPath+"/all.yaml")
+	// 订阅服务只保留动态 DB 输出路径。
 	router.GET("/sub", app.getSubscription)
-	router.Static("/sub/", saver.OutputPath)
 
 	// 根据配置决定是否启用Web控制面板
 	if config.GlobalConfig.EnableWebUI {
@@ -62,6 +60,7 @@ func (app *App) initHttpServer() error {
 		api.Use(app.authMiddleware(config.GlobalConfig.APIKey)) // 添加认证中间件
 		{
 			// 配置相关API
+			api.GET("/ui-info", app.getUIInfo)
 			api.GET("/config", app.getConfig)
 			api.POST("/config", app.updateConfig)
 			api.POST("/config/add", app.addConfig)
@@ -79,17 +78,9 @@ func (app *App) initHttpServer() error {
 
 		// 配置页面
 		router.GET("/admin", func(c *gin.Context) {
-			// 构建订阅路径
-			scheme := "http"
-			if c.Request.TLS != nil {
-				scheme = "https"
-			}
-			host := c.Request.Host
-			subpath := fmt.Sprintf("%s://%s/sub?token=%s", scheme, host, url.QueryEscape(config.GlobalConfig.SubToken))
-
 			c.HTML(http.StatusOK, "admin.html", gin.H{
-				"configPath": app.configPath,
-				"subpath":    subpath,
+				"configPath": "验证 API 密钥后显示",
+				"subpath":    "验证 API 密钥后显示",
 			})
 		})
 	} else {
@@ -112,13 +103,59 @@ func (app *App) initHttpServer() error {
 // authMiddleware API认证中间件
 func (app *App) authMiddleware(key string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		apiKey := c.GetHeader("X-API-Key")
-		if subtle.ConstantTimeCompare([]byte(apiKey), []byte(key)) != 1 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "无效的API密钥"})
+		authKey := authFailureKey("api", c)
+		now := time.Now()
+		db, err := output.GetDB()
+		if err != nil {
+			slog.Warn("打开鉴权数据库失败", "error", err)
+			c.AbortWithStatus(http.StatusNotFound)
 			return
+		}
+		blocked, err := db.IsAuthBlocked(authKey, now)
+		if err != nil {
+			slog.Warn("检查API封禁失败", "error", err)
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		if blocked {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+
+		apiKey := c.GetHeader("X-API-Key")
+		if !constantTimeEqual(apiKey, key) {
+			if err := db.RecordAuthFailure(authKey, now, authMaxFailures, authBanDuration); err != nil {
+				slog.Warn("记录API鉴权失败", "error", err)
+			}
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		if err := db.ClearAuthFailure(authKey); err != nil {
+			slog.Debug("清理API鉴权失败记录失败", "error", err)
 		}
 		c.Next()
 	}
+}
+
+func (app *App) subscriptionURL(c *gin.Context) string {
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s/sub?token=%s", scheme, c.Request.Host, url.QueryEscape(config.GlobalConfig.SubToken))
+}
+
+func authFailureKey(scope string, c *gin.Context) string {
+	return scope + "|" + c.ClientIP()
+}
+
+func constantTimeEqual(provided, expected string) bool {
+	provided = strings.TrimSpace(provided)
+	expected = strings.TrimSpace(expected)
+	if len(provided) == 0 || len(expected) == 0 || len(provided) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
 }
 
 func GenerateSimpleKey() string {

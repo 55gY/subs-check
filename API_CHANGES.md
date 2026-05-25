@@ -1,5 +1,127 @@
 # API 调整说明
 
+## 🔄 安全加固：订阅鉴权、API 防护与敏感信息隐藏 - 2026年5月25日
+
+### 功能概述
+
+对整个 HTTP 接口层进行安全加固，核心目标：防止暴力破解、隐藏敏感信息、统一鉴权失败响应、持久化封禁状态。
+
+### 订阅接口变更
+
+#### 移除 `/all.yaml` 静态路由
+
+原来的 `/all.yaml`（及其他 `/sub/*.yaml`）静态文件路由已完全移除，不再提供固定文件路径访问。
+
+#### 统一为 `/sub?token=...`
+
+订阅接口现在统一为：
+
+```text
+GET /sub?token=YOUR_SUB_TOKEN
+```
+
+- `token` 为必填查询参数，对应配置文件中的 `sub-token` 字段
+- token 为空或无效时返回 HTTP 404
+- 支持动态筛选参数（`test`、`speed`），与原有行为一致
+
+```bash
+# 基本订阅
+curl "http://localhost:8199/sub?token=YOUR_SUB_TOKEN"
+
+# 按阶段和速度筛选
+curl "http://localhost:8199/sub?token=YOUR_SUB_TOKEN&test=1&speed=100"
+```
+
+#### `sub-token` 配置
+
+```yaml
+# 配置文件中设置；为空时自动生成随机 token
+sub-token: ""
+```
+
+- 首次运行或保存配置时若为空，会自动生成 32 字节 base64url 编码的随机 token
+- 生成后会写入配置文件，后续启动沿用
+
+### 新增 `/api/ui-info` 端点
+
+```text
+GET /api/ui-info
+Header: X-API-Key: YOUR_API_KEY
+```
+
+返回当前订阅地址和配置文件路径，需 API Key 认证：
+
+```json
+{
+  "configPath": "/path/to/config.yaml",
+  "subpath": "http://localhost:8199/sub?token=YOUR_SUB_TOKEN"
+}
+```
+
+用途：Web 面板在 API Key 验证成功后调用此接口获取真实地址，避免在未认证页面直接暴露敏感信息。
+
+### 鉴权失败防护机制
+
+#### 统一 404 响应
+
+所有鉴权失败（包括 `/sub` token 无效和 `/api/*` API Key 无效）统一返回 **HTTP 404**，不返回 401、403 或 JSON 错误信息。
+
+目的：避免泄露接口存在性、认证方式或错误详情。
+
+#### DB 持久化封禁
+
+- 鉴权失败记录存储在 bbolt 数据库的 `auth` bucket 中
+- 同一 IP 地址在同一 scope（`sub` 或 `api`）下连续失败 **3 次**后，封禁 **30 天**
+- 封禁数据持久化到 DB，服务重启后不丢失
+- 鉴权成功后自动清除该 IP 的失败记录
+
+#### 鉴权数据结构
+
+```go
+type AuthFailureRecord struct {
+    Key        string    // 格式: "scope|clientIP"
+    FailCount  int       // 连续失败次数
+    LastFailAt time.Time // 最近一次失败时间
+    BannedUntil time.Time // 封禁截止时间（零值表示未封禁）
+    UpdatedAt  time.Time // 记录更新时间
+}
+```
+
+### Web 面板变更
+
+- `/admin` 页面默认显示占位文本："验证 API 密钥后显示"
+- 订阅地址和配置路径默认不展示
+- 用户输入 API Key 验证成功后，前端调用 `/api/ui-info` 获取真实地址并更新显示
+- 验证失败（收到 404）时保持占位文本不变
+
+### 兼容性说明
+
+1. 原有 `/sub/all.yaml` 路径已不可用，所有调用方需改为 `/sub?token=...`。
+2. 原有动态筛选参数（`test`、`speed`）保持兼容。
+3. API Key 认证方式（`X-API-Key` 请求头）不变。
+4. `/api/config`、`/api/status` 等管理端点的请求/响应格式不变。
+5. 配置文件中的 `sub-token` 字段为空时会自动生成，无需手动配置。
+
+### 相关代码变更
+
+- `core/server.go`:
+  - 移除 `/sub/all.yaml` 静态路由
+  - 新增 `authMiddleware`（DB 持久化封禁）
+  - 新增 `subscriptionURL`、`authFailureKey`、`constantTimeEqual`
+  - 新增 `GenerateSecureToken`、`GenerateSimpleKey`
+  - 封禁常量：`authMaxFailures=3`、`authBanDuration=30天`
+- `core/handlers.go`:
+  - `/sub` 端点新增 token 校验和 DB 鉴权
+  - 新增 `getUIInfo` 端点
+  - 新增 `validSubToken`（使用 `crypto/subtle.ConstantTimeCompare`）
+  - `addMultipleNodesDirectly`/`addSingleNodeFromProxy` 改用 DB 写入
+- `output/db.go`:
+  - 新增 `IsAuthBlocked`、`RecordAuthFailure`、`ClearAuthFailure`、`CleanupAuthFailures`
+- `output/db_model.go`:
+  - 新增 `authBucketName` 常量和 `AuthFailureRecord` 结构体
+- `core/admin.html`:
+  - 前端占位文本与 `/api/ui-info` 调用逻辑
+
 ## 🔄 修复订阅阶段状态被旧阶段覆盖 - 2026年4月10日
 
 ### 功能概述
@@ -126,9 +248,10 @@ GET /sub/all.yaml?test=2&speed=500
 output/subs.db
 ```
 
-数据库为单文件 KV 结构，目前主要使用一个 bucket：
+数据库为单文件 KV 结构，目前主要使用两个 bucket：
 
 1. **`nodes`**：保存节点检测结果记录
+2. **`auth`**：保存鉴权失败与封禁记录（2026-05-25 新增）
 
 每条记录会按自增 ID 存储，记录内容为 JSON 序列化后的节点检测结果。核心字段如下：
 

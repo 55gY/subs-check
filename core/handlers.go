@@ -173,7 +173,7 @@ func upsertTopLevelConfigValue(content, key, value, insertAfter string) string {
 	return content + "\n" + newLine
 }
 
-// addConfig 添加单个或多个节点到all.yaml，或添加订阅链接到配置
+// addConfig 添加单个或多个节点到数据库，或添加订阅链接到配置
 func (app *App) addConfig(c *gin.Context) {
 	var req struct {
 		SubUrl string `json:"sub_url"`
@@ -332,7 +332,7 @@ func (app *App) addConfig(c *gin.Context) {
 			return
 		}
 
-		// 检测并添加节点到 all.yaml
+		// 检测并添加节点到数据库
 		result := app.testAndAddNodes(proxies)
 
 		// 至少需要有一个节点通过检测
@@ -636,17 +636,49 @@ func (app *App) getVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"version": app.version})
 }
 
+func (app *App) getUIInfo(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"configPath": app.configPath,
+		"subpath":    app.subscriptionURL(c),
+	})
+}
+
 func (app *App) getSubscription(c *gin.Context) {
-	if !validSubToken(c.Query("token")) {
+	authKey := authFailureKey("sub", c)
+	now := time.Now()
+	db, err := output.GetDB()
+	if err != nil {
+		slog.Warn("打开订阅数据库失败", "error", err)
+		c.Status(http.StatusNotFound)
+		return
+	}
+	blocked, err := db.IsAuthBlocked(authKey, now)
+	if err != nil {
+		slog.Warn("检查订阅封禁失败", "error", err)
+		c.Status(http.StatusNotFound)
+		return
+	}
+	if blocked {
 		c.Status(http.StatusNotFound)
 		return
 	}
 
-	testStage := output.TestMedia
+	if !validSubToken(c.Query("token")) {
+		if err := db.RecordAuthFailure(authKey, now, authMaxFailures, authBanDuration); err != nil {
+			slog.Warn("记录订阅鉴权失败", "error", err)
+		}
+		c.Status(http.StatusNotFound)
+		return
+	}
+	if err := db.ClearAuthFailure(authKey); err != nil {
+		slog.Debug("清理订阅鉴权失败记录失败", "error", err)
+	}
+
+	testStage := output.TestAlive
 	if rawTest := strings.TrimSpace(c.Query("test")); len(rawTest) > 0 {
 		parsed, err := strconv.Atoi(rawTest)
 		if err != nil || parsed < output.TestAlive || parsed > output.TestMedia {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "test 仅支持 0、1、2"})
+			c.Status(http.StatusNotFound)
 			return
 		}
 		testStage = parsed
@@ -656,7 +688,7 @@ func (app *App) getSubscription(c *gin.Context) {
 	if rawSpeed := strings.TrimSpace(c.Query("speed")); len(rawSpeed) > 0 {
 		parsed, err := strconv.Atoi(rawSpeed)
 		if err != nil || parsed < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "speed 必须是大于等于 0 的整数，单位 KB/s"})
+			c.Status(http.StatusNotFound)
 			return
 		}
 		minSpeed = parsed
@@ -665,19 +697,14 @@ func (app *App) getSubscription(c *gin.Context) {
 		minSpeed = 0
 	}
 
-	db, err := output.GetDB()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("打开数据库失败: %v", err)})
-		return
-	}
-
 	records, err := db.QueryRecords(testStage, minSpeed)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("查询订阅失败: %v", err)})
+		slog.Warn("查询订阅失败", "error", err)
+		c.Status(http.StatusNotFound)
 		return
 	}
 	if len(records) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "未找到符合条件的节点"})
+		c.Status(http.StatusNotFound)
 		return
 	}
 
@@ -689,13 +716,14 @@ func (app *App) getSubscription(c *gin.Context) {
 		proxies = append(proxies, record.Proxy)
 	}
 	if len(proxies) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "未找到可输出的节点"})
+		c.Status(http.StatusNotFound)
 		return
 	}
 
 	yamlData, err := yaml.Marshal(map[string]any{"proxies": proxies})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("生成订阅内容失败: %v", err)})
+		slog.Warn("生成订阅内容失败", "error", err)
+		c.Status(http.StatusNotFound)
 		return
 	}
 
@@ -927,8 +955,7 @@ type AddResult struct {
 	DuplicateNodes int // 重复跳过的节点数
 }
 
-// addMultipleNodesDirectly 批量添加多个节点到all.yaml（不进行网络检测）
-// 使用一次性读写策略，提升性能
+// addMultipleNodesDirectly 批量添加多个节点到数据库（不进行网络检测）
 func (app *App) addMultipleNodesDirectly(proxies []map[string]any) AddResult {
 	result := AddResult{
 		TotalNodes: len(proxies),
@@ -938,84 +965,33 @@ func (app *App) addMultipleNodesDirectly(proxies []map[string]any) AddResult {
 		return result
 	}
 
-	// 使用互斥锁保护整个读写过程
-	app.allYamlMutex.Lock()
-	defer app.allYamlMutex.Unlock()
-
-	saver, err := output.NewLocalSaver()
+	db, err := output.GetDB()
 	if err != nil {
+		slog.Warn("打开数据库失败", "error", err)
 		return result
 	}
 
-	allYamlPath := saver.OutputPath + "/all.yaml"
-	var existingConfig map[string]any
-
-	// 读取现有配置
-	if data, err := os.ReadFile(allYamlPath); err == nil {
-		if err := yaml.Unmarshal(data, &existingConfig); err != nil {
-			return result
-		}
-	} else {
-		// 文件不存在，创建新配置
-		existingConfig = make(map[string]any)
-	}
-
-	// 获取现有proxies列表
-	var existingProxies []map[string]any
-	if proxiesInterface, ok := existingConfig["proxies"]; ok {
-		if proxiesList, ok := proxiesInterface.([]any); ok {
-			for _, p := range proxiesList {
-				if proxyMap, ok := p.(map[string]any); ok {
-					existingProxies = append(existingProxies, proxyMap)
-				}
-			}
-		}
-	}
-
-	// 遍历所有节点，检查重复并收集有效节点
-	var nodesToAdd []map[string]any
+	records := make([]output.DBNodeRecord, 0, len(proxies))
 	for _, proxy := range proxies {
-		if isProxyDuplicate(proxy, existingProxies) {
-			result.DuplicateNodes++
-			continue
-		}
-		// 检查是否与本次待添加列表重复
-		if isProxyDuplicate(proxy, nodesToAdd) {
-			result.DuplicateNodes++
-			continue
-		}
-		nodesToAdd = append(nodesToAdd, proxy)
+		records = append(records, output.DBNodeRecord{
+			Batch:     output.BatchCurrent,
+			TestStage: output.TestAlive,
+			Proxy:     proxy,
+		})
 	}
 
-	// 如果没有需要添加的节点，直接返回
-	if len(nodesToAdd) == 0 {
-		return result
-	}
-
-	// 一次性追加所有有效节点
-	existingProxies = append(existingProxies, nodesToAdd...)
-	existingConfig["proxies"] = existingProxies
-
-	// 写回文件
-	newData, err := yaml.Marshal(existingConfig)
+	added, duplicates, err := db.InsertRecordsDedup(records)
 	if err != nil {
+		slog.Warn("写入节点到数据库失败", "error", err)
 		return result
 	}
-
-	if err := os.MkdirAll(saver.OutputPath, 0755); err != nil {
-		return result
-	}
-
-	if err := os.WriteFile(allYamlPath, newData, 0644); err != nil {
-		return result
-	}
-
-	result.AddedNodes = len(nodesToAdd)
+	result.AddedNodes = added
+	result.DuplicateNodes = duplicates
 	return result
 }
 
 // testAndAddNodes 统一的节点检测和添加函数
-// 并发检测所有节点，测速通过的添加到 all.yaml
+// 并发检测所有节点，测速通过的添加到数据库
 // 设置 120 秒总超时，超时后返回已完成的部分结果
 func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 	startTime := time.Now()
@@ -1121,10 +1097,9 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 				}
 			}
 
-			// 测速通过，添加到 all.yaml
+			// 测速通过，添加到数据库
 			passedCount.Add(1)
 
-			// addSingleNodeFromProxy 内部已使用全局锁保护
 			err = app.addSingleNodeFromProxy(proxyMap)
 			if err == nil {
 				addedCount.Add(1)
@@ -1158,64 +1133,29 @@ finish:
 	return result
 }
 
-// addSingleNodeFromProxy 从 proxy map 添加单个节点到 all.yaml（内部使用）
+// addSingleNodeFromProxy 从 proxy map 添加单个节点到数据库（内部使用）
 func (app *App) addSingleNodeFromProxy(proxy map[string]any) error {
-	// 读取现有的all.yaml (使用互斥锁保护)
-	app.allYamlMutex.Lock()
-	defer app.allYamlMutex.Unlock()
-
-	saver, err := output.NewLocalSaver()
+	db, err := output.GetDB()
 	if err != nil {
-		return fmt.Errorf("创建保存器失败: %w", err)
+		return fmt.Errorf("打开数据库失败: %w", err)
 	}
 
-	allYamlPath := saver.OutputPath + "/all.yaml"
-	var existingConfig map[string]any
-
-	if data, err := os.ReadFile(allYamlPath); err == nil {
-		if err := yaml.Unmarshal(data, &existingConfig); err != nil {
-			return fmt.Errorf("解析all.yaml失败: %w", err)
-		}
-	} else {
-		// 文件不存在，创建新配置
-		existingConfig = make(map[string]any)
+	testStage := output.TestAlive
+	if len(strings.TrimSpace(config.GlobalConfig.SpeedTestUrl)) > 0 {
+		testStage = output.TestSpeed
 	}
 
-	// 获取现有proxies列表
-	var existingProxies []map[string]any
-	if proxiesInterface, ok := existingConfig["proxies"]; ok {
-		if proxiesList, ok := proxiesInterface.([]any); ok {
-			for _, p := range proxiesList {
-				if proxyMap, ok := p.(map[string]any); ok {
-					existingProxies = append(existingProxies, proxyMap)
-				}
-			}
-		}
+	added, duplicates, err := db.InsertRecordsDedup([]output.DBNodeRecord{{
+		Batch:     output.BatchCurrent,
+		TestStage: testStage,
+		Proxy:     proxy,
+	}})
+	if err != nil {
+		return err
 	}
-
-	// 检查是否已存在
-	if isProxyDuplicate(proxy, existingProxies) {
+	if added == 0 && duplicates > 0 {
 		return fmt.Errorf("节点已存在")
 	}
-
-	// 添加新节点
-	existingProxies = append(existingProxies, proxy)
-	existingConfig["proxies"] = existingProxies
-
-	// 写回文件
-	newData, err := yaml.Marshal(existingConfig)
-	if err != nil {
-		return fmt.Errorf("序列化配置失败: %w", err)
-	}
-
-	if err := os.MkdirAll(saver.OutputPath, 0755); err != nil {
-		return fmt.Errorf("创建输出目录失败: %w", err)
-	}
-
-	if err := os.WriteFile(allYamlPath, newData, 0644); err != nil {
-		return fmt.Errorf("写入all.yaml失败: %w", err)
-	}
-
 	return nil
 }
 

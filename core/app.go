@@ -23,18 +23,17 @@ import (
 
 // App 结构体用于管理应用程序状态
 type App struct {
-	configPath   string
-	interval     int
-	watcher      *fsnotify.Watcher
-	checkChan    chan struct{} // 触发检测的通道
-	checking     atomic.Bool   // 检测状态标志
-	stopping     atomic.Bool   // 停止中状态标志
-	allYamlMutex sync.Mutex    // 保护 all.yaml 文件的读写
-	configMutex  sync.Mutex    // 保护 config.yaml 文件的读写
-	ticker       *time.Ticker
-	done         chan struct{} // 用于结束ticker goroutine的信号
-	cron         *cron.Cron    // crontab调度器
-	version      string
+	configPath  string
+	interval    int
+	watcher     *fsnotify.Watcher
+	checkChan   chan struct{} // 触发检测的通道
+	checking    atomic.Bool   // 检测状态标志
+	stopping    atomic.Bool   // 停止中状态标志
+	configMutex sync.Mutex    // 保护 config.yaml 文件的读写
+	ticker      *time.Ticker
+	done        chan struct{} // 用于结束ticker goroutine的信号
+	cron        *cron.Cron    // crontab调度器
+	version     string
 }
 
 // New 创建新的应用实例
@@ -243,7 +242,6 @@ func (app *App) checkProxies() error {
 	}
 
 	slog.Info("检测完成")
-	output.SaveConfig(results)
 	util.SendNotify(
 		config.GlobalConfig.AppriseApiServer,
 		config.GlobalConfig.RecipientUrl,

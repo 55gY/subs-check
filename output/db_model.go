@@ -14,6 +14,7 @@ const (
 const (
 	dbFileName      = "subs.db"
 	nodesBucketName = "nodes"
+	authBucketName  = "auth"
 )
 
 type DBNodeRecord struct {
@@ -35,4 +36,12 @@ type DBNodeRecord struct {
 	IP        string `json:"ip"`
 	IPRisk    string `json:"ipRisk"`
 	Country   string `json:"country"`
+}
+
+type AuthFailureRecord struct {
+	Key         string    `json:"key"`
+	FailCount   int       `json:"failCount"`
+	LastFailAt  time.Time `json:"lastFailAt"`
+	BannedUntil time.Time `json:"bannedUntil"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }

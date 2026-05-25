@@ -1,4 +1,37 @@
 # 功能调整/变更说明
+## [2026-05-25] 安全加固：订阅鉴权与 API 防护
+
+**调整内容**:
+1. 移除 `/all.yaml` 静态文件路由，订阅接口统一为 `/sub?token=...`，不再暴露固定文件路径。
+2. 订阅接口 `/sub` 新增 token 校验：访问时必须携带 `?token=xxx` 查询参数，token 无效时返回 404。
+3. 新增 DB 持久化鉴权失败追踪：使用 bbolt `auth` bucket 存储失败记录，同一 IP 连续失败 3 次后封禁 30 天。
+4. API 鉴权中间件（`/api/*`）与订阅鉴权（`/sub`）均接入 DB 持久化封禁，封禁数据在服务重启后不丢失。
+5. 所有鉴权失败统一返回 HTTP 404（非 401/JSON），避免泄露接口存在性和错误详情。
+6. 新增 `/api/ui-info` 受保护端点：需 API Key 验证后返回真实订阅地址和配置文件路径。
+7. Web 面板（`/admin`）默认显示占位文本"验证 API 密钥后显示"，前端在 API Key 验证成功后调用 `/api/ui-info` 获取真实信息。
+8. 移除 `core/app.go` 中的 `allYamlMutex` 字段和 `output.SaveConfig(results)` 调用。
+9. Web/API 节点写入改为通过 `db.InsertRecordsDedup()` 直接入库，不再写入静态文件。
+10. `sub-token` 配置项：空值时自动生成随机 token；配置文件和文档中的订阅示例统一改为 `/sub?token=...` 格式。
+
+**影响范围**:
+1. `core/server.go` - 移除静态路由，新增 `authMiddleware`、`subscriptionURL`、`authFailureKey`、`GenerateSecureToken`、`GenerateSimpleKey`，封禁常量 `authMaxFailures=3`、`authBanDuration=30天`。
+2. `core/handlers.go` - `/sub` 端点新增 token 校验和 DB 鉴权；新增 `getUIInfo`、`validSubToken`；`addMultipleNodesDirectly`/`addSingleNodeFromProxy` 改用 DB 写入。
+3. `core/app.go` - 移除 `allYamlMutex` 和 `SaveConfig` 调用。
+4. `output/db.go` - 新增 `IsAuthBlocked`、`RecordAuthFailure`、`ClearAuthFailure`、`CleanupAuthFailures` 方法。
+5. `output/db_model.go` - 新增 `authBucketName` 常量和 `AuthFailureRecord` 结构体。
+6. `core/admin.html` - 前端默认显示占位文本，API Key 验证后调用 `/api/ui-info` 获取真实地址。
+7. `config/config.example.yaml` - 订阅示例改为 `/sub?token=...`，新增 `sub-token` 配置说明。
+8. `README.md` - 订阅接口示例和说明更新。
+9. `subs-check.sh` - 状态输出中的订阅地址示例更新。
+
+**注意事项**:
+1. token 比较使用 `crypto/subtle.ConstantTimeCompare`，防止时序攻击。
+2. 同一地址连续 3 次鉴权失败后封禁 30 天，封禁数据持久化到 DB，重启不丢失。
+3. 所有鉴权失败均返回 HTTP 404，不返回 401 或 JSON 错误信息，避免信息泄露。
+4. 订阅地址和配置路径仅在 API Key 验证成功后才通过 `/api/ui-info` 返回，Web 面板默认不展示。
+5. `sub-token` 为空时程序启动或保存配置时会自动生成随机 token 并写入配置文件。
+6. 旧配置文件如仍使用 `/all.yaml` 作为订阅源地址，需要手动更新为 `/sub?token=...` 格式。
+
 ## [2026-04-10] 变更说明
 **调整内容**:
 1. 修复 Web 面板在点击“开始检测”后的订阅获取阶段，状态文本被上一轮检测残留阶段错误覆盖为“媒体检测”的问题。

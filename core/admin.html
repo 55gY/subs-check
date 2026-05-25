@@ -342,7 +342,7 @@
         <div class="alert alert-info mb-3 d-flex justify-content-between align-items-center" style="background-color: #87e87f !important;">
             <div>
                 <strong>订阅地址:</strong>
-                <span class="sub-path" title="{{.subpath}}">{{.subpath}}</span>
+                <span class="sub-path" id="subPath" title="验证 API 密钥后显示">验证 API 密钥后显示</span>
             </div>
         </div>
         
@@ -351,7 +351,7 @@
             <div class="row">
                 <div class="col-md-5 col-sm-12 status-item">
                     <strong>配置文件:</strong> 
-                    <span class="config-path" title="{{.configPath}}">{{.configPath}}</span>
+                    <span class="config-path" id="configPath" title="验证 API 密钥后显示">验证 API 密钥后显示</span>
                 </div>
                 <div class="col-md-3 col-sm-6 status-item">
                     <strong>当前状态:</strong> 
@@ -507,9 +507,13 @@
                 if (response.status === 401) {
                     alert('API密钥无效，请检查后重试');
                     return false;
+                } else if (response.status === 404) {
+                    alert('API密钥无效，请检查后重试');
+                    return false;
                 } else if (response.ok) {
                     alert('API密钥有效，已保存到本地');
                     // 重新加载数据
+                    loadUiInfo();
                     loadConfig();
                     loadLogs();
                     updateStatus();
@@ -567,7 +571,10 @@
             });
             
             // 加载配置
-            loadConfig();
+            if (getApiKey()) {
+                loadUiInfo();
+                loadConfig();
+            }
             
             // 设置编辑器遮罩层
             const toggleConfigBtn = document.getElementById('toggleConfig');
@@ -596,13 +603,46 @@
         
         // 处理未授权响应
         function handleUnauthorized(response, showAlert = true) {
-            if (response.status === 401) {
+            if (response.status === 401 || response.status === 404) {
                 if (showAlert) {
                     alert('API密钥无效或未提供，请检查您的API密钥');
                 }
                 return true;
             }
             return false;
+        }
+
+        function loadUiInfo() {
+            return fetch('/api/ui-info', {
+                headers: addApiKeyHeader()
+            })
+            .then(response => {
+                if (handleUnauthorized(response, false)) {
+                    return;
+                }
+                if (!response.ok) {
+                    throw new Error('加载界面信息失败');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data) {
+                    return;
+                }
+                const subPath = document.getElementById('subPath');
+                const configPath = document.getElementById('configPath');
+                if (subPath && data.subpath) {
+                    subPath.textContent = data.subpath;
+                    subPath.title = data.subpath;
+                }
+                if (configPath && data.configPath) {
+                    configPath.textContent = data.configPath;
+                    configPath.title = data.configPath;
+                }
+            })
+            .catch(error => {
+                console.error('加载界面信息失败:', error);
+            });
         }
         
         // 加载配置
@@ -1128,16 +1168,16 @@
             });
         }
         
-        // 初始加载
-        loadConfig();
-        updateStatus();
-        loadLogs();
-        
         // 检查API密钥
         const apiKey = localStorage.getItem('apiKey');
         if (!apiKey) {
             alert('请先输入API密钥以使用本系统');
             document.getElementById('apiKey').focus();
+        } else {
+            loadUiInfo();
+            loadConfig();
+            updateStatus();
+            loadLogs();
         }
         
         // 定时刷新
