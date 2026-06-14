@@ -80,6 +80,17 @@ func (app *App) Initialize() error {
 	}()
 
 	if config.GlobalConfig.ListenPort != "" {
+		// 启动前执行鉴权记录迁移（scope|IP → IP）+ compact
+		if db, err := output.GetDB(); err == nil {
+			if migrated, compacted, mErr := db.MigrateAuthRecords(); mErr != nil {
+				slog.Warn("鉴权记录迁移失败", "error", mErr)
+			} else if migrated > 0 {
+				slog.Info("鉴权记录迁移完成", "迁移数量", migrated, "compact", compacted)
+			}
+		} else {
+			slog.Warn("打开鉴权数据库失败，跳过迁移", "error", err)
+		}
+
 		if err := app.initHttpServer(); err != nil {
 			return fmt.Errorf("初始化HTTP服务器失败: %w", err)
 		}

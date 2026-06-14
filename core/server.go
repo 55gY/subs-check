@@ -84,6 +84,10 @@ func (app *App) initHttpServer() error {
 
 			// 日志相关API
 			api.GET("/logs", app.getLogs)
+
+			// 黑名单管理API
+			api.GET("/blacklist", app.getBlacklist)
+			api.DELETE("/blacklist/:ip", app.deleteBlacklist)
 		}
 
 		// 配置页面
@@ -114,7 +118,7 @@ func (app *App) initHttpServer() error {
 // 每次请求实时读取 config.GlobalConfig.APIKey，支持热更新
 func (app *App) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authKey := authFailureKey("api", c)
+		ip := c.ClientIP()
 		now := time.Now()
 		db, err := output.GetDB()
 		if err != nil {
@@ -122,7 +126,7 @@ func (app *App) authMiddleware() gin.HandlerFunc {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
-		blocked, err := db.IsAuthBlocked(authKey, now)
+		blocked, err := db.IsAuthBlocked(ip, now)
 		if err != nil {
 			slog.Warn("检查API封禁失败", "error", err)
 			c.AbortWithStatus(http.StatusNotFound)
@@ -135,13 +139,13 @@ func (app *App) authMiddleware() gin.HandlerFunc {
 
 		apiKey := c.GetHeader("X-API-Key")
 		if !constantTimeEqual(apiKey, config.GlobalConfig.APIKey) {
-			if err := db.RecordAuthFailure(authKey, now, authMaxFailures, authBanDuration); err != nil {
+			if err := db.RecordAuthFailure(ip, "api", now, authMaxFailures, authBanDuration); err != nil {
 				slog.Warn("记录API鉴权失败", "error", err)
 			}
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
-		if err := db.ClearAuthFailure(authKey); err != nil {
+		if err := db.ClearAuthFailure(ip); err != nil {
 			slog.Debug("清理API鉴权失败记录失败", "error", err)
 		}
 		c.Next()
@@ -154,10 +158,6 @@ func (app *App) subscriptionURL(c *gin.Context) string {
 		scheme = "https"
 	}
 	return fmt.Sprintf("%s://%s/sub?token=%s", scheme, c.Request.Host, url.QueryEscape(config.GlobalConfig.SubToken))
-}
-
-func authFailureKey(scope string, c *gin.Context) string {
-	return scope + "|" + c.ClientIP()
 }
 
 func constantTimeEqual(provided, expected string) bool {

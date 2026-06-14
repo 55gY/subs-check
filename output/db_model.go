@@ -39,9 +39,10 @@ type DBNodeRecord struct {
 }
 
 type AuthFailureRecord struct {
-	Key         string    `json:"key"`
-	FailCount   int       `json:"failCount"`
-	LastFailAt  time.Time `json:"lastFailAt"`
-	BannedUntil time.Time `json:"bannedUntil"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	Key         string    `json:"key"`         // IP 地址
+	FailCount   int       `json:"failCount"`   // 连续鉴权失败次数
+	LastScope   string    `json:"lastScope"`   // 最后触发的 scope（api 或 sub）
+	LastFailAt  time.Time `json:"lastFailAt"`  // 最近一次鉴权失败时间
+	BannedUntil time.Time `json:"bannedUntil"` // 封禁截止时间（零值表示未封禁）
+	UpdatedAt   time.Time `json:"updatedAt"`   // 记录最后更新时间
 }

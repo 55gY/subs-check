@@ -372,6 +372,35 @@
             </div>
         </div>
         
+        <!-- 黑名单管理面板 -->
+        <div class="card mb-3" id="blacklistPanel" style="display:none;">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-shield-exclamation me-1"></i>黑名单管理</span>
+                <button id="refreshBlacklist" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-arrow-repeat me-1"></i>刷新
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>IP 地址</th>
+                                <th>失败次数</th>
+                                <th>最后触发</th>
+                                <th>封禁截止</th>
+                                <th>最后 Scope</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="blacklistBody">
+                            <tr><td colspan="6" class="text-center text-muted py-3">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
         <!-- 主要内容区域 -->
         <div class="row">
             <!-- 左侧日志区域 -->
@@ -1168,6 +1197,93 @@
             });
         }
         
+        // 黑名单管理
+        function loadBlacklist() {
+            const panel = document.getElementById('blacklistPanel');
+            const tbody = document.getElementById('blacklistBody');
+            
+            fetch('/api/blacklist', {
+                headers: addApiKeyHeader()
+            })
+            .then(response => {
+                if (handleUnauthorized(response, false)) {
+                    panel.style.display = 'none';
+                    return;
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data) return;
+                
+                const records = data.records || [];
+                if (records.length === 0) {
+                    panel.style.display = 'none';
+                    return;
+                }
+                
+                panel.style.display = '';
+                tbody.innerHTML = '';
+                
+                records.sort((a, b) => {
+                    if (a.bannedUntil && !b.bannedUntil) return -1;
+                    if (!a.bannedUntil && b.bannedUntil) return 1;
+                    return new Date(b.lastFailAt) - new Date(a.lastFailAt);
+                });
+                
+                records.forEach(record => {
+                    const tr = document.createElement('tr');
+                    const isBanned = record.bannedUntil && new Date(record.bannedUntil) > new Date();
+                    
+                    tr.innerHTML = `
+                        <td><code>${record.key}</code></td>
+                        <td>${record.failCount}</td>
+                        <td>${record.lastFailAt ? new Date(record.lastFailAt).toLocaleString() : '-'}</td>
+                        <td>${isBanned ? '<span class="text-danger">' + new Date(record.bannedUntil).toLocaleString() + '</span>' : '<span class="text-muted">未封禁</span>'}</td>
+                        <td><span class="badge ${record.lastScope === 'api' ? 'bg-info' : 'bg-secondary'}">${record.lastScope || '-'}</span></td>
+                        <td><button class="btn btn-outline-danger btn-sm" onclick="removeBlacklist('${record.key}')"><i class="bi bi-trash"></i> 移除</button></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            })
+            .catch(error => {
+                if (error.message !== '未授权') {
+                    console.error('加载黑名单失败:', error);
+                }
+            });
+        }
+        
+        function removeBlacklist(ip) {
+            if (!confirm(`确定要移除 ${ip} 的黑名单记录吗？`)) return;
+            
+            fetch('/api/blacklist/' + encodeURIComponent(ip), {
+                method: 'DELETE',
+                headers: addApiKeyHeader()
+            })
+            .then(response => {
+                if (handleUnauthorized(response, true)) return;
+                return response.json();
+            })
+            .then(data => {
+                if (data && data.message) {
+                    loadBlacklist();
+                } else if (data && data.error) {
+                    alert('移除失败: ' + data.error);
+                }
+            })
+            .catch(error => {
+                if (error.message !== '未授权') {
+                    alert('移除失败: ' + error.message);
+                }
+            });
+        }
+        
+        document.getElementById('refreshBlacklist').addEventListener('click', function() {
+            const icon = this.querySelector('i');
+            icon.classList.add('rotate-animation');
+            loadBlacklist();
+            setTimeout(() => icon.classList.remove('rotate-animation'), 500);
+        });
+        
         // 检查API密钥
         const apiKey = localStorage.getItem('apiKey');
         if (!apiKey) {
@@ -1178,11 +1294,13 @@
             loadConfig();
             updateStatus();
             loadLogs();
+            loadBlacklist();
         }
         
         // 定时刷新
         setInterval(loadLogs, 10000);
 		setInterval(updateStatus, 2000); // 从5秒改为2秒，提高进度更新响应性
+        setInterval(loadBlacklist, 30000); // 每30秒刷新黑名单
         function getVersionInfo() {
             fetch('/api/version', {
                 headers: addApiKeyHeader()

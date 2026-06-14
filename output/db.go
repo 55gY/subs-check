@@ -3,8 +3,11 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -283,7 +286,7 @@ func (db *DB) IsAuthBlocked(key string, now time.Time) (bool, error) {
 	return blocked, err
 }
 
-func (db *DB) RecordAuthFailure(key string, now time.Time, maxFailures int, banDuration time.Duration) error {
+func (db *DB) RecordAuthFailure(key string, scope string, now time.Time, maxFailures int, banDuration time.Duration) error {
 	if db == nil || db.conn == nil {
 		return fmt.Errorf("数据库未初始化")
 	}
@@ -306,6 +309,7 @@ func (db *DB) RecordAuthFailure(key string, now time.Time, maxFailures int, banD
 		}
 
 		record.FailCount++
+		record.LastScope = scope
 		record.LastFailAt = now
 		record.UpdatedAt = now
 		if record.FailCount >= maxFailures {
@@ -358,6 +362,257 @@ func (db *DB) CleanupAuthFailures(now time.Time) error {
 			}
 		}
 		return nil
+	})
+}
+
+// MigrateAuthRecords 迁移旧格式 key（scope|IP → IP），合并重复记录，然后 compact 数据库
+func (db *DB) MigrateAuthRecords() (int, bool, error) {
+	if db == nil || db.conn == nil {
+		return 0, false, fmt.Errorf("数据库未初始化")
+	}
+
+	var migrated int
+	var compacted bool
+
+	// Step 1: 迁移旧格式 key（scope|IP → IP）
+	err := db.conn.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(authBucketName))
+		if bucket == nil {
+			return fmt.Errorf("bucket %s 不存在", authBucketName)
+		}
+
+		cursor := bucket.Cursor()
+		var toDelete [][]byte
+		ipRecords := make(map[string]AuthFailureRecord)
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			oldKey := string(key)
+			// 检查是否为旧格式（scope|IP）
+			pipeIdx := strings.Index(oldKey, "|")
+			if pipeIdx < 0 {
+				continue // 已经是新格式（纯 IP）
+			}
+
+			scope := oldKey[:pipeIdx]
+			ip := oldKey[pipeIdx+1:]
+			if ip == "" {
+				continue
+			}
+
+			var record AuthFailureRecord
+			if err := json.Unmarshal(value, &record); err != nil {
+				continue
+			}
+
+			toDelete = append(toDelete, key)
+
+			// 合并同 IP 的多条记录
+			if existing, ok := ipRecords[ip]; ok {
+				// 保留 BannedUntil 最晚的记录
+				if record.BannedUntil.After(existing.BannedUntil) {
+					record.Key = ip
+					record.LastScope = scope
+					record.FailCount = maxInt(record.FailCount, existing.FailCount)
+					ipRecords[ip] = record
+				} else {
+					existing.FailCount = maxInt(record.FailCount, existing.FailCount)
+					ipRecords[ip] = existing
+				}
+			} else {
+				record.Key = ip
+				record.LastScope = scope
+				ipRecords[ip] = record
+			}
+		}
+
+		// 删除旧 key
+		for _, k := range toDelete {
+			if err := bucket.Delete(k); err != nil {
+				return fmt.Errorf("删除旧 key 失败: %w", err)
+			}
+		}
+
+		// 写入新 key（纯 IP）
+		for ip, record := range ipRecords {
+			record.UpdatedAt = time.Now()
+			data, err := json.Marshal(record)
+			if err != nil {
+				return fmt.Errorf("序列化迁移记录失败: %w", err)
+			}
+			if err := bucket.Put([]byte(ip), data); err != nil {
+				return fmt.Errorf("写入迁移记录失败: %w", err)
+			}
+			migrated++
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, false, fmt.Errorf("迁移鉴权记录失败: %w", err)
+	}
+
+	// Step 2: Compact（仅在有迁移时执行）
+	if migrated > 0 {
+		saver, err := NewLocalSaver()
+		if err == nil {
+			dbPath := filepath.Join(saver.OutputPath, dbFileName)
+			tmpPath := dbPath + ".compact"
+
+			if beforeInfo, err := os.Stat(dbPath); err == nil {
+				// 关闭当前连接
+				_ = db.conn.Close()
+				db.conn = nil
+
+				// 使用 bbolt CopyFile 执行 compact（只复制有效页）
+				compactErr := compactDBFile(dbPath, tmpPath)
+
+				if compactErr == nil {
+					// 用 compact 后的文件替换原文件
+					if renameErr := os.Rename(tmpPath, dbPath); renameErr == nil {
+						// 重新打开
+						newConn, openErr := bbolt.Open(dbPath, fileMode, nil)
+						if openErr == nil {
+							db.conn = newConn
+							compacted = true
+							if afterInfo, err := os.Stat(dbPath); err == nil {
+								slog.Info("Compact 完成",
+									"compact前", fmt.Sprintf("%.2fMB", float64(beforeInfo.Size())/1024/1024),
+									"compact后", fmt.Sprintf("%.2fMB", float64(afterInfo.Size())/1024/1024))
+							}
+						} else {
+							slog.Error("重新打开 compact 后数据库失败", "error", openErr)
+						}
+					} else {
+						slog.Error("重命名 compact 文件失败", "error", renameErr)
+						_ = os.Remove(tmpPath)
+						// 重新打开原文件
+						newConn, openErr := bbolt.Open(dbPath, fileMode, nil)
+						if openErr == nil {
+							db.conn = newConn
+						}
+					}
+				} else {
+					slog.Warn("Compact 失败，使用原文件继续", "error", compactErr)
+					_ = os.Remove(tmpPath)
+					// 重新打开原文件
+					newConn, openErr := bbolt.Open(dbPath, fileMode, nil)
+					if openErr == nil {
+						db.conn = newConn
+					}
+				}
+
+				// 确保 conn 不为 nil
+				if db.conn == nil {
+					newConn, openErr := bbolt.Open(dbPath, fileMode, nil)
+					if openErr == nil {
+						db.conn = newConn
+					}
+				}
+			}
+		}
+	}
+
+	return migrated, compacted, nil
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// compactDBFile 通过打开源数据库并复制有效数据到新数据库来 compact
+func compactDBFile(srcPath, dstPath string) error {
+	// 以只读模式打开源数据库
+	srcDB, err := bbolt.Open(srcPath, fileMode, &bbolt.Options{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("打开源数据库失败: %w", err)
+	}
+
+	// 创建目标数据库
+	dstDB, err := bbolt.Open(dstPath, fileMode, nil)
+	if err != nil {
+		srcDB.Close()
+		return fmt.Errorf("创建目标数据库失败: %w", err)
+	}
+
+	// 逐个 bucket 复制有效数据
+	copyErr := srcDB.View(func(tx *bbolt.Tx) error {
+		return tx.ForEach(func(name []byte, srcBucket *bbolt.Bucket) error {
+			return dstDB.Update(func(dstTx *bbolt.Tx) error {
+				dstBucket, err := dstTx.CreateBucket(name)
+				if err != nil {
+					return err
+				}
+				return srcBucket.ForEach(func(k, v []byte) error {
+					return dstBucket.Put(k, v)
+				})
+			})
+		})
+	})
+
+	// 先关闭两个数据库
+	dstCloseErr := dstDB.Close()
+	srcDB.Close()
+
+	if copyErr != nil {
+		_ = os.Remove(dstPath)
+		return fmt.Errorf("复制数据失败: %w", copyErr)
+	}
+	if dstCloseErr != nil {
+		_ = os.Remove(dstPath)
+		return fmt.Errorf("关闭目标数据库失败: %w", dstCloseErr)
+	}
+
+	return nil
+}
+
+// QueryAuthRecords 查询所有鉴权失败记录
+func (db *DB) QueryAuthRecords() ([]AuthFailureRecord, error) {
+	if db == nil || db.conn == nil {
+		return nil, fmt.Errorf("数据库未初始化")
+	}
+
+	var records []AuthFailureRecord
+	err := db.conn.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(authBucketName))
+		if bucket == nil {
+			return fmt.Errorf("bucket %s 不存在", authBucketName)
+		}
+
+		cursor := bucket.Cursor()
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var record AuthFailureRecord
+			if err := json.Unmarshal(value, &record); err != nil {
+				continue
+			}
+			records = append(records, record)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return records, nil
+}
+
+// DeleteAuthRecord 按 IP 删除单条鉴权失败记录
+func (db *DB) DeleteAuthRecord(ip string) error {
+	if db == nil || db.conn == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+
+	return db.conn.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(authBucketName))
+		if bucket == nil {
+			return fmt.Errorf("bucket %s 不存在", authBucketName)
+		}
+		if bucket.Get([]byte(ip)) == nil {
+			return fmt.Errorf("记录不存在: %s", ip)
+		}
+		return bucket.Delete([]byte(ip))
 	})
 }
 
