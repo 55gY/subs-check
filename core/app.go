@@ -213,7 +213,7 @@ func (app *App) triggerCheck() {
 
 	if err := app.checkProxies(); err != nil {
 		slog.Error(fmt.Sprintf("检测代理失败: %v", err))
-		os.Exit(1)
+		return
 	}
 
 	// 检测完成后显示下次检查时间

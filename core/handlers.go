@@ -527,7 +527,7 @@ func (app *App) getStatus(c *gin.Context) {
 	currentStageName := "空闲"
 	statusText := "空闲"
 
-	if subsTotal > 0 && subsProgress < subsTotal {
+	if proxyutils.SubsFetchActive.Load() || (subsTotal > 0 && subsProgress < subsTotal) {
 		// 订阅获取阶段:显示成功获取的订阅数
 		available = uint32(proxyutils.SubsFetchSuccess.Load())
 		failed = proxyutils.SubsFetchFailed.Load()
@@ -568,11 +568,16 @@ func (app *App) getStatus(c *gin.Context) {
 		"progressPercent": func() float64 {
 			return float64(checker.Progress.Load()) / 100
 		}(),
-		"failed":           failed,
-		"stage":            stage,
-		"statusText":       statusText,
-		"currentStageCode": currentStageCode,
-		"currentStageName": currentStageName,
+		"failed":            failed,
+		"stage":             stage,
+		"statusText":        statusText,
+		"currentStageCode":  currentStageCode,
+		"currentStageName":  currentStageName,
+		"subsFetchActive":   proxyutils.SubsFetchActive.Load(),
+		"subsFetchTotal":    subsTotal,
+		"subsFetchSuccess":  proxyutils.SubsFetchSuccess.Load(),
+		"subsFetchFailed":   proxyutils.SubsFetchFailed.Load(),
+		"subsFetchProgress": subsProgress,
 	}
 
 	// 添加详细统计信息
@@ -594,6 +599,9 @@ func (app *App) getStatus(c *gin.Context) {
 			default:
 				currentStageCode = "idle"
 			}
+		} else {
+			currentStageCode = "subscription"
+			currentStageName = "订阅获取"
 		}
 
 		response["detailStats"] = gin.H{
@@ -603,6 +611,10 @@ func (app *App) getStatus(c *gin.Context) {
 			"speedSuccess":        speedSuccess,
 			"speedDone":           speedDone,
 			"mediaDone":           mediaDone,
+			"subsFetchTotal":      subsTotal,
+			"subsFetchSuccess":    proxyutils.SubsFetchSuccess.Load(),
+			"subsFetchFailed":     proxyutils.SubsFetchFailed.Load(),
+			"subsFetchProgress":   subsProgress,
 			"currentStage":        currentStage,
 			"currentStageName":    currentStageName,
 			"currentStageDone":    currentStageDone,

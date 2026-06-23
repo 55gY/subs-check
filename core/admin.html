@@ -251,6 +251,15 @@
             color: inherit;
             opacity: 0.9;
         }
+
+        .stage-step-meta-item {
+            display: block;
+            line-height: 1.25;
+        }
+
+        .stage-step-meta-item > span {
+            font-weight: 600;
+        }
         
         .progress-bar {
             transition: width 0.5s ease;
@@ -422,19 +431,35 @@
                         <div id="stageSteps" class="stage-steps">
                             <div class="stage-step pending" data-stage-code="subscription">
                                 <span class="stage-step-label">订阅获取</span>
-                                <span class="stage-step-meta">等待中</span>
+                                <span class="stage-step-meta" data-stage-meta="subscription">
+                                    <span class="stage-step-meta-item">总数: <span data-stage-total id="subsFetchTotal">0</span></span>
+                                    <span class="stage-step-meta-item">成功: <span data-stage-success id="subsFetchSuccess">0</span></span>
+                                    <span class="stage-step-meta-item">失败: <span data-stage-failed id="subsFetchFailed">0</span></span>
+                                </span>
                             </div>
                             <div class="stage-step pending" data-stage-code="alive">
                                 <span class="stage-step-label">测活</span>
-                                <span class="stage-step-meta">等待中</span>
+                                <span class="stage-step-meta" data-stage-meta="alive">
+                                    <span class="stage-step-meta-item">总数: <span data-stage-total id="aliveTotal">0</span></span>
+                                    <span class="stage-step-meta-item">成功: <span data-stage-success id="aliveSuccess">0</span></span>
+                                    <span class="stage-step-meta-item">失败: <span data-stage-failed id="aliveFailed">0</span></span>
+                                </span>
                             </div>
                             <div class="stage-step pending" data-stage-code="speed">
                                 <span class="stage-step-label">测速</span>
-                                <span class="stage-step-meta">等待中</span>
+                                <span class="stage-step-meta" data-stage-meta="speed">
+                                    <span class="stage-step-meta-item">总数: <span data-stage-total id="speedTotal">0</span></span>
+                                    <span class="stage-step-meta-item">成功: <span data-stage-success id="speedSuccess">0</span></span>
+                                    <span class="stage-step-meta-item">失败: <span data-stage-failed id="speedFailed">0</span></span>
+                                </span>
                             </div>
                             <div class="stage-step pending" data-stage-code="media">
                                 <span class="stage-step-label">媒体</span>
-                                <span class="stage-step-meta">等待中</span>
+                                <span class="stage-step-meta" data-stage-meta="media">
+                                    <span class="stage-step-meta-item">总数: <span data-stage-total id="mediaTotal">0</span></span>
+                                    <span class="stage-step-meta-item">成功: <span data-stage-success id="mediaSuccess">0</span></span>
+                                    <span class="stage-step-meta-item">失败: <span data-stage-failed id="mediaFailed">0</span></span>
+                                </span>
                             </div>
                         </div>
                         <!-- 详细统计信息 -->
@@ -1028,85 +1053,108 @@
             if (stopping && isCurrentStage) {
                 return '停止中';
             }
-
-            if (stepCode === 'subscription') {
-                return isCurrentStage ? (statusText || '进行中') : '已完成';
-            }
-
-            const stageStatsMap = {
-                alive: detailStats?.stageStats?.alive,
-                speed: detailStats?.stageStats?.speed,
-                media: detailStats?.stageStats?.media,
-            };
-
-            const stats = stageStatsMap[stepCode];
-            if (!stats) {
-                if (isCurrentStage) {
-                    const stageDone = detailStats?.currentStageDone ?? 0;
-                    const stageTotal = detailStats?.currentStageTotal ?? 0;
-                    if (stageTotal > 0) {
-                        return `${stageDone}/${stageTotal}`;
-                    }
-                    return statusText || '进行中';
-                }
-                return '已完成';
-            }
-
-            const done = stats.done ?? 0;
-            const success = stats.success ?? 0;
-
-            if (isCurrentStage) {
-                const stageDone = detailStats?.currentStageDone ?? done;
-                const stageTotal = detailStats?.currentStageTotal ?? 0;
-                const parts = [];
-                if (stageTotal > 0) {
-                    parts.push(`${stageDone}/${stageTotal}`);
-                } else if (stageDone > 0) {
-                    parts.push(`已完成${stageDone}`);
-                }
-                if (success > 0) {
-                    parts.push(`通过${success}`);
-                }
-                return parts.length > 0 ? parts.join(' · ') : (statusText || '进行中');
-            }
-
-            if (done > 0 || success > 0) {
-                return `通过${success} / 完成${done}`;
-            }
-
-            return '已完成';
+            return isCurrentStage ? (statusText || '进行中') : '等待中';
         }
 
         function updateStageSteps(currentStageCode, detailStats, statusText, checking, stopping) {
             const steps = document.querySelectorAll('#stageSteps .stage-step');
-            const currentIndex = getStageOrder(currentStageCode);
+            const subscriptionTotal = Number(window.__statusData?.subsFetchTotal ?? detailStats?.subsFetchTotal ?? 0);
+            const subscriptionProgress = Number(window.__statusData?.subsFetchProgress ?? detailStats?.subsFetchProgress ?? 0);
+            const subscriptionSuccess = Number(window.__statusData?.subsFetchSuccess ?? detailStats?.subsFetchSuccess ?? 0);
+            const subscriptionFailed = Number(window.__statusData?.subsFetchFailed ?? detailStats?.subsFetchFailed ?? 0);
+            const subscriptionActive = Boolean(detailStats?.subsFetchActive) || (checking && currentStageCode === 'subscription');
+            const subscriptionDone = !subscriptionActive && subscriptionTotal > 0 && subscriptionProgress >= subscriptionTotal;
+            const aliveDone = Number(detailStats?.aliveDone || 0);
+            const aliveSuccess = Number(detailStats?.aliveSuccess || 0);
+            const speedDone = Number(detailStats?.speedDone || 0);
+            const speedSuccess = Number(detailStats?.speedSuccess || 0);
+            const mediaDone = Number(detailStats?.mediaDone || 0);
 
-            steps.forEach((step, index) => {
+            const setValue = (selectors, value) => {
+                selectors.forEach((selector) => {
+                    const el = document.querySelector(selector);
+                    if (el) {
+                        el.textContent = String(value);
+                    }
+                });
+            };
+
+            setValue(['#subsFetchTotal', '[data-stage-total]#subsFetchTotal'], subscriptionTotal);
+            setValue(['#subsFetchSuccess', '[data-stage-success]#subsFetchSuccess'], subscriptionSuccess);
+            setValue(['#subsFetchFailed', '[data-stage-failed]#subsFetchFailed'], subscriptionFailed);
+            setValue(['#aliveTotal', '[data-stage-total]#aliveTotal'], aliveDone);
+            setValue(['#aliveSuccess', '[data-stage-success]#aliveSuccess'], aliveSuccess);
+            setValue(['#aliveFailed', '[data-stage-failed]#aliveFailed'], Math.max(aliveDone - aliveSuccess, 0));
+            setValue(['#speedTotal', '[data-stage-total]#speedTotal'], speedDone);
+            setValue(['#speedSuccess', '[data-stage-success]#speedSuccess'], speedSuccess);
+            setValue(['#speedFailed', '[data-stage-failed]#speedFailed'], Math.max(speedDone - speedSuccess, 0));
+            setValue(['#mediaTotal', '[data-stage-total]#mediaTotal'], mediaDone);
+            setValue(['#mediaSuccess', '[data-stage-success]#mediaSuccess'], mediaDone);
+            setValue(['#mediaFailed', '[data-stage-failed]#mediaFailed'], 0);
+
+            const stageState = {
+                subscription: { active: subscriptionActive, done: subscriptionDone },
+                alive: { active: checking && aliveDone > 0, done: aliveDone > 0 },
+                speed: { active: checking && speedDone > 0, done: speedDone > 0 },
+                media: { active: checking && mediaDone > 0, done: mediaDone > 0 },
+            };
+
+            steps.forEach((step) => {
                 const stepCode = step.dataset.stageCode;
                 const meta = step.querySelector('.stage-step-meta');
+                const totalEl = step.querySelector('[data-stage-total]');
+                const successEl = step.querySelector('[data-stage-success]');
+                const failedEl = step.querySelector('[data-stage-failed]');
 
                 step.classList.remove('active', 'done', 'pending', 'stopping');
 
-                if (!checking && !stopping || currentIndex === -1) {
+                if (stepCode === 'subscription') {
+                    if (stageState.subscription.active) {
+                        step.classList.add(stopping ? 'stopping' : 'active');
+                    } else if (stageState.subscription.done) {
+                        step.classList.add('done');
+                    } else {
+                        step.classList.add('pending');
+                    }
+                    return;
+                }
+
+                if (stepCode === 'alive') {
+                    if (stageState.alive.active) {
+                        step.classList.add(stopping ? 'stopping' : 'active');
+                    } else if (stageState.alive.done) {
+                        step.classList.add('done');
+                    } else {
+                        step.classList.add('pending');
+                    }
+                    return;
+                }
+
+                if (stepCode === 'speed') {
+                    if (stageState.speed.active) {
+                        step.classList.add(stopping ? 'stopping' : 'active');
+                    } else if (stageState.speed.done) {
+                        step.classList.add('done');
+                    } else {
+                        step.classList.add('pending');
+                    }
+                    return;
+                }
+
+                if (stepCode === 'media') {
+                    if (stageState.media.active) {
+                        step.classList.add(stopping ? 'stopping' : 'active');
+                    } else if (stageState.media.done) {
+                        step.classList.add('done');
+                    } else {
+                        step.classList.add('pending');
+                    }
+                    return;
+                }
+
+                if (!checking && !stopping) {
                     step.classList.add('pending');
-                    meta.textContent = '等待中';
-                    return;
                 }
-
-                if (index < currentIndex) {
-                    step.classList.add('done');
-                    meta.textContent = getStageMetaText(stepCode, detailStats, statusText, false);
-                    return;
-                }
-
-                if (index === currentIndex) {
-                    step.classList.add(stopping ? 'stopping' : 'active');
-                    meta.textContent = getStageMetaText(stepCode, detailStats, statusText, true, stopping);
-                    return;
-                }
-
-                step.classList.add('pending');
-                meta.textContent = '等待中';
             });
         }
         
@@ -1128,12 +1176,17 @@
                     const statusText = document.getElementById('nextCheckTime');
                     const stageBadge = document.getElementById('stageBadge');
 
+                    window.__statusData = data;
+
                     if (stageBadge) {
-                        const stageName = data.currentStageName || (data.stage === 'subscription' ? '订阅获取' : '空闲');
+                        const stageName = (data.checking && data.subsFetchActive) ? '订阅获取' : (data.currentStageName || '空闲');
                         stageBadge.textContent = `阶段: ${stageName}`;
                     }
-                    
+
                     // 更新状态
+                    updateStageSteps(data.currentStageCode, data.detailStats, data.statusText, data.checking, data.stopping);
+                    updateProgressBar(data.proxyCount, data.progress, data.available, data.failed, data.stage, data.detailStats, data.progressPercent);
+
                     if (data.checking) {
                         if (data.stopping) {
                             statusContainer.className = 'text-warning';
@@ -1145,9 +1198,6 @@
                             statusText.textContent = data.statusText || '正在检测中...';
                         }
                         
-                        // 更新进度条 - 传递failed、stage和detailStats参数
-                        updateProgressBar(data.proxyCount, data.progress, data.available, data.failed, data.stage, data.detailStats, data.progressPercent);
-                        updateStageSteps(data.currentStageCode, data.detailStats, data.statusText, data.checking, data.stopping);
                     } else {
                         if (data.stopping) {
                             statusContainer.className = 'text-warning';
@@ -1167,7 +1217,6 @@
                         document.getElementById('detailStatsText').textContent = '';
                         document.getElementById('progressBarTotal').style.width = '0%';
                         document.getElementById('progressBarSuccess').style.width = '0%';
-                        updateStageSteps(data.currentStageCode, data.detailStats, data.statusText, data.checking, data.stopping);
                     }
                 }
             })

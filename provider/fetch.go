@@ -33,6 +33,7 @@ var SubsFetchProgress atomic.Int32 // 已完成数
 var SubsFetchTotal atomic.Int32    // 总数
 var SubsFetchSuccess atomic.Int32  // 成功数
 var SubsFetchFailed atomic.Int32   // 失败数
+var SubsFetchActive atomic.Bool    // 订阅获取是否仍在进行中
 
 // 缓存的备用网络接口
 var alternativeInterfaces []net.IP
@@ -95,10 +96,10 @@ func createHTTPClient(timeout int, localIP net.IP) *http.Client {
 			InsecureSkipVerify: true, // 接受无效证书
 		},
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          0,              // 禁用连接池
-		MaxIdleConnsPerHost:   0,              // 禁用每个主机的连接池
-		DisableKeepAlives:     true,           // 禁用 Keep-Alive
-		IdleConnTimeout:       0,              // 立即关闭空闲连接
+		MaxIdleConns:          0,    // 禁用连接池
+		MaxIdleConnsPerHost:   0,    // 禁用每个主机的连接池
+		DisableKeepAlives:     true, // 禁用 Keep-Alive
+		IdleConnTimeout:       0,    // 立即关闭空闲连接
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
@@ -142,16 +143,17 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 	SubsFetchProgress.Store(0)
 	SubsFetchSuccess.Store(0)
 	SubsFetchFailed.Store(0)
+	SubsFetchActive.Store(true)
 
 	if len(config.GlobalConfig.NodeType) > 0 {
 		slog.Info("只筛选用户设置的协议", "type", config.GlobalConfig.NodeType)
 	}
 
 	var wg sync.WaitGroup
-	proxyChan := make(chan map[string]any, 1)   // 缓冲通道存储解析的代理
-	concurrentLimit := make(chan struct{}, 1000) // 订阅拉取固定使用1000并发，不受concurrent限制
-	failedSubsChan := make(chan string, len(subUrls)) // 收集失败的订阅链接
-	successSubsChan := make(chan string, len(subUrls))                     // 收集成功的订阅链接
+	proxyChan := make(chan map[string]any, 1)          // 缓冲通道存储解析的代理
+	concurrentLimit := make(chan struct{}, 1000)       // 订阅拉取固定使用1000并发，不受concurrent限制
+	failedSubsChan := make(chan string, len(subUrls))  // 收集失败的订阅链接
+	successSubsChan := make(chan string, len(subUrls)) // 收集成功的订阅链接
 
 	// 订阅获取进度统计
 	var completedTotal, failedTotal, successTotal atomic.Int32
@@ -160,6 +162,7 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 	markSuccess := func(url string) {
 		successSubsChan <- url
 		successTotal.Add(1)
+		completedTotal.Add(1)
 		SubsFetchSuccess.Store(successTotal.Load())
 		SubsFetchProgress.Store(completedTotal.Load())
 	}
@@ -168,6 +171,7 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 	markFailed := func(url string) {
 		failedSubsChan <- url
 		failedTotal.Add(1)
+		completedTotal.Add(1)
 		SubsFetchFailed.Store(failedTotal.Load())
 		SubsFetchProgress.Store(completedTotal.Load())
 	}
@@ -217,8 +221,6 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 		go func(url string) {
 			defer wg.Done()
 			defer func() { <-concurrentLimit }() // 释放令牌
-			defer completedTotal.Add(1)
-
 			// 节点计数器：nodeCountTotal(过滤前), nodeCountValid(过滤后)
 			var nodeCountTotal, nodeCountValid int
 
@@ -417,6 +419,7 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 	}
 
 	<-done // 等待收集完成
+	SubsFetchActive.Store(false)
 
 	// 收集失败和成功的订阅链接
 	failedSubs := make([]string, 0)
@@ -575,7 +578,7 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 	altInterfaces := getAlternativeInterfaces()
 	for _, localIP := range altInterfaces {
 		altClient := createHTTPClient(timeout, localIP)
-		
+
 		for i := 0; i < maxRetries; i++ {
 			if i > 0 {
 				time.Sleep(time.Duration(retryInterval) * time.Second)
@@ -659,7 +662,7 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 	// 阶段4：使用备用接口+订阅代理重试
 	for _, localIP := range altInterfaces {
 		altClient := createHTTPClient(timeout, localIP)
-		
+
 		for _, proxyUrl := range subProxies {
 			// 对原始订阅URL进行编码后拼接到代理URL
 			encodedUrl := u.QueryEscape(subUrl)
