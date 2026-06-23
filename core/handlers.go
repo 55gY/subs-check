@@ -173,12 +173,14 @@ func (app *App) addConfig(c *gin.Context) {
 		SubUrl string `json:"sub_url"`
 		SS     string `json:"ss"`   // 单个或多个节点链接（支持换行分隔的多个节点链接）
 		Test   bool   `json:"test"` // 是否在添加前进行检测（默认false）
+		Log    bool   `json:"log"`  // 是否返回更详细的检测日志（默认false）
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求格式"})
 		return
 	}
+	slog.Info("API /api/config/add 请求", "sub_url", req.SubUrl, "test", req.Test, "log", req.Log, "ss_present", req.SS != "")
 
 	// 如果是单个节点添加
 	if req.SS != "" {
@@ -194,7 +196,7 @@ func (app *App) addConfig(c *gin.Context) {
 				return
 			}
 
-			result := app.testAndAddNodes(proxies)
+			result := app.testAndAddNodes(proxies, req.Log)
 			if result.PassedNodes == 0 {
 				response := gin.H{
 					"error":        "节点检测失败",
@@ -204,10 +206,14 @@ func (app *App) addConfig(c *gin.Context) {
 					"added_nodes":  0,
 					"duration":     result.Duration,
 				}
+				if req.Log {
+					response["logs"] = result.Logs
+				}
 				if result.Timeout {
 					response["timeout"] = true
 					response["warning"] = "部分节点因超时未完成检测"
 				}
+				slog.Info("API /api/config/add 响应", "status", http.StatusBadRequest, "response", response)
 				c.JSON(http.StatusBadRequest, response)
 				return
 			}
@@ -220,10 +226,14 @@ func (app *App) addConfig(c *gin.Context) {
 				"added_nodes":  result.AddedNodes,
 				"duration":     result.Duration,
 			}
+			if req.Log {
+				response["logs"] = result.Logs
+			}
 			if result.Timeout {
 				response["timeout"] = true
 				response["warning"] = "部分节点因超时未完成检测"
 			}
+			slog.Info("API /api/config/add 响应", "status", http.StatusOK, "response", response)
 			c.JSON(http.StatusOK, response)
 			return
 		}
@@ -242,13 +252,15 @@ func (app *App) addConfig(c *gin.Context) {
 		result := app.addMultipleNodesDirectly(proxies)
 		if result.AddedNodes == 0 && result.DuplicateNodes == 0 {
 			// 所有节点都失败
-			c.JSON(http.StatusBadRequest, gin.H{
+			response := gin.H{
 				"error":        "所有节点添加失败",
 				"tested_nodes": result.TotalNodes,
 				"passed_nodes": result.TotalNodes,
 				"failed_nodes": 0,
 				"added_nodes":  0,
-			})
+			}
+			slog.Info("API /api/config/add 响应", "status", http.StatusBadRequest, "response", response)
+			c.JSON(http.StatusBadRequest, response)
 			return
 		}
 
@@ -264,6 +276,7 @@ func (app *App) addConfig(c *gin.Context) {
 			response["duplicate_nodes"] = result.DuplicateNodes
 			response["message"] = fmt.Sprintf("成功添加 %d 个节点，%d 个节点已存在", result.AddedNodes, result.DuplicateNodes)
 		}
+		slog.Info("API /api/config/add 响应", "status", http.StatusOK, "response", response)
 		c.JSON(http.StatusOK, response)
 		return
 	}
@@ -327,7 +340,7 @@ func (app *App) addConfig(c *gin.Context) {
 		}
 
 		// 检测并添加节点到数据库
-		result := app.testAndAddNodes(proxies)
+		result := app.testAndAddNodes(proxies, req.Log)
 
 		// 至少需要有一个节点通过检测
 		if result.PassedNodes == 0 {
@@ -340,10 +353,14 @@ func (app *App) addConfig(c *gin.Context) {
 				"added_nodes":  0,
 				"duration":     result.Duration,
 			}
+			if req.Log {
+				response["logs"] = result.Logs
+			}
 			if result.Timeout {
 				response["timeout"] = true
 				response["warning"] = "部分节点因超时未完成检测"
 			}
+			slog.Info("API /api/config/add 响应", "status", http.StatusBadRequest, "response", response)
 			c.JSON(http.StatusBadRequest, response)
 			return
 		}
@@ -477,17 +494,23 @@ func (app *App) addConfig(c *gin.Context) {
 			"added_nodes":  testResult.AddedNodes,
 			"duration":     testResult.Duration,
 		}
+		if req.Log {
+			response["logs"] = testResult.Logs
+		}
 		if testResult.Timeout {
 			response["timeout"] = true
 			response["warning"] = "部分节点因超时未完成检测"
 		}
+		slog.Info("API /api/config/add 响应", "status", http.StatusOK, "response", response)
 		c.JSON(http.StatusOK, response)
 	} else {
 		// 原有的简单响应
-		c.JSON(http.StatusOK, gin.H{
+		response := gin.H{
 			"message": "订阅链接已添加",
 			"sub_url": req.SubUrl,
-		})
+		}
+		slog.Info("API /api/config/add 响应", "status", http.StatusOK, "response", response)
+		c.JSON(http.StatusOK, response)
 	}
 }
 
@@ -981,6 +1004,7 @@ type TestResult struct {
 	AddedNodes  int    // 实际添加的节点数（排除重复）
 	Duration    string // 检测耗时
 	Timeout     bool   // 是否超时
+	Logs        []string
 }
 
 // AddResult 节点直接添加结果（test:false模式）
@@ -1028,7 +1052,7 @@ func (app *App) addMultipleNodesDirectly(proxies []map[string]any) AddResult {
 // testAndAddNodes 统一的节点检测和添加函数
 // 并发检测所有节点，测速通过的添加到数据库
 // 设置 120 秒总超时，超时后返回已完成的部分结果
-func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
+func (app *App) testAndAddNodes(proxies []map[string]any, logEnabled bool) TestResult {
 	startTime := time.Now()
 	result := TestResult{
 		TestedNodes: len(proxies),
@@ -1062,10 +1086,19 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 		concurrent = 5
 	}
 	semaphore := make(chan struct{}, concurrent)
-
 	// 统计变量
 	var passedCount, failedCount, addedCount atomic.Int32
 	var wg sync.WaitGroup
+	var logsMu sync.Mutex
+	var logs []string
+	appendLog := func(msg string) {
+		if !logEnabled {
+			return
+		}
+		logsMu.Lock()
+		logs = append(logs, msg)
+		logsMu.Unlock()
+	}
 
 	// 并发检测所有节点
 	for _, proxy := range proxies {
@@ -1096,6 +1129,9 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 			client := checker.CreateClient(proxyMap)
 			if client == nil {
 				failedCount.Add(1)
+				if logEnabled {
+					appendLog(fmt.Sprintf("节点 %v: 创建客户端失败, type=%v, server=%v, port=%v", proxyMap["name"], proxyMap["type"], proxyMap["server"], proxyMap["port"]))
+				}
 				return
 			}
 			defer client.Close()
@@ -1109,9 +1145,18 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 			}
 
 			// 存活检测
-			alive, err := checker.CheckAlive(ctx, client.Client)
+			var alive bool
+			var err error
+			if config.GlobalConfig.UnifiedDelay {
+				alive, _, err = checker.CheckAliveWithWarmup(ctx, client.Client)
+			} else {
+				alive, err = checker.CheckAlive(ctx, client.Client)
+			}
 			if err != nil || !alive {
 				failedCount.Add(1)
+				if logEnabled {
+					appendLog(fmt.Sprintf("节点 %v: 存活检测失败, alive=%v, unified_delay=%v, timeout=%d, warmup_timeout=%d, test_timeout=%d, error=%v", proxyMap["name"], alive, config.GlobalConfig.UnifiedDelay, config.GlobalConfig.Timeout, config.GlobalConfig.WarmupTimeout, config.GlobalConfig.TestTimeout, err))
+				}
 				return
 			}
 
@@ -1128,6 +1173,9 @@ func (app *App) testAndAddNodes(proxies []map[string]any) TestResult {
 				_, err := checker.CheckSpeed(ctx, client.Client, client.BytesRead)
 				if err != nil {
 					failedCount.Add(1)
+					if logEnabled {
+						appendLog(fmt.Sprintf("节点 %v: 测速失败, speed_test_url=%s, download_timeout=%d, error=%v", proxyMap["name"], config.GlobalConfig.SpeedTestUrl, config.GlobalConfig.DownloadTimeout, err))
+					}
 					return
 				}
 			}
@@ -1164,6 +1212,12 @@ finish:
 	result.FailedNodes = int(failedCount.Load())
 	result.AddedNodes = int(addedCount.Load())
 	result.Duration = time.Since(startTime).Round(time.Millisecond).String()
+	if logEnabled {
+		if len(logs) == 0 {
+			logs = append(logs, fmt.Sprintf("节点检测未记录到详细失败原因, unified_delay=%v, timeout=%d, warmup_timeout=%d, test_timeout=%d, speed_test_url=%q", config.GlobalConfig.UnifiedDelay, config.GlobalConfig.Timeout, config.GlobalConfig.WarmupTimeout, config.GlobalConfig.TestTimeout, config.GlobalConfig.SpeedTestUrl))
+		}
+		result.Logs = logs
+	}
 
 	return result
 }
@@ -1270,6 +1324,24 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 				if ok {
 					for _, p := range proxyList {
 						if proxyMap, ok := p.(map[string]any); ok {
+							proxyMap["skip-cert-verify"] = true
+							if proxyMap["servername"] == nil {
+								if sni, ok := proxyMap["sni"].(string); ok && strings.TrimSpace(sni) != "" {
+									proxyMap["servername"] = sni
+								}
+							}
+							// 为 WS 节点注入 client-fingerprint，提高握手成功率
+							if proxyMap["network"] == "ws" && proxyMap["client-fingerprint"] == nil {
+								proxyMap["client-fingerprint"] = "chrome"
+							}
+							// 不再注入 fingerprint 字段，避免与证书指纹验证冲突
+							if wsOpts, ok := proxyMap["ws-opts"].(map[string]any); ok {
+								if headers, ok := wsOpts["headers"].(map[string]any); ok {
+									if host, ok := headers["Host"].(string); ok && strings.TrimSpace(host) != "" && proxyMap["servername"] == nil {
+										proxyMap["servername"] = host
+									}
+								}
+							}
 							proxies = append(proxies, proxyMap)
 						}
 					}
@@ -1304,6 +1376,27 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 		extractedData := []byte(strings.Join(links, "\n"))
 		proxyList, err := convert.ConvertsV2Ray(extractedData)
 		if err == nil && len(proxyList) > 0 {
+			// 在提取的节点上强行注入跳过证书校验和sni等信息，防止被 CDN 或握手规则拦截
+			for _, p := range proxyList {
+				p["skip-cert-verify"] = true
+				if p["servername"] == nil {
+					if sni, ok := p["sni"].(string); ok && strings.TrimSpace(sni) != "" {
+						p["servername"] = sni
+					}
+				}
+				// 为 WS 节点注入 client-fingerprint，提高握手成功率
+				if p["network"] == "ws" && p["client-fingerprint"] == nil {
+					p["client-fingerprint"] = "chrome"
+				}
+				// 不再注入 fingerprint 字段，避免与证书指纹验证冲突
+				if wsOpts, ok := p["ws-opts"].(map[string]any); ok {
+					if headers, ok := wsOpts["headers"].(map[string]any); ok {
+						if host, ok := headers["Host"].(string); ok && strings.TrimSpace(host) != "" && p["servername"] == nil {
+							p["servername"] = host
+						}
+					}
+				}
+			}
 			return proxyList, nil
 		}
 	}
@@ -1311,6 +1404,14 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 	// 作为后备方案，直接尝试 V2Ray 链接格式（可能是单行或其他格式）
 	proxyList, err := convert.ConvertsV2Ray(data)
 	if err == nil && len(proxyList) > 0 {
+		// 为 WS 节点注入 skip-cert-verify 和 client-fingerprint，提高握手成功率
+		for _, p := range proxyList {
+			p["skip-cert-verify"] = true
+			if p["network"] == "ws" && p["client-fingerprint"] == nil {
+				p["client-fingerprint"] = "chrome"
+			}
+			// 不再注入 fingerprint 字段，避免与证书指纹验证冲突
+		}
 		return proxyList, nil
 	}
 

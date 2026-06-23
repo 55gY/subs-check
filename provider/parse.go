@@ -11,5 +11,13 @@ func ParseSingleNode(nodeLink string) ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 为 WS 节点注入 skip-cert-verify 和 client-fingerprint，提高握手成功率
+	for _, p := range proxies {
+		p["skip-cert-verify"] = true
+		if p["network"] == "ws" && p["client-fingerprint"] == nil {
+			p["client-fingerprint"] = "chrome"
+		}
+		// 不再注入 fingerprint 字段，避免与证书指纹验证冲突
+	}
 	return proxies, nil
 }

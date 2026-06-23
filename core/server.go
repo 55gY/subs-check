@@ -138,6 +138,11 @@ func (app *App) authMiddleware() gin.HandlerFunc {
 		}
 
 		apiKey := c.GetHeader("X-API-Key")
+		if apiKey == "" {
+			if authHeader := strings.TrimSpace(c.GetHeader("Authorization")); strings.HasPrefix(authHeader, "Bearer ") {
+				apiKey = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+			}
+		}
 		if !constantTimeEqual(apiKey, config.GlobalConfig.APIKey) {
 			if err := db.RecordAuthFailure(ip, "api", now, authMaxFailures, authBanDuration); err != nil {
 				slog.Warn("记录API鉴权失败", "error", err)

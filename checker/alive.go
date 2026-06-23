@@ -16,6 +16,10 @@ func doAliveRequest(ctx context.Context, httpClient *http.Client, url string) (i
 		return 0, 0, err
 	}
 
+	// 添加 User-Agent，某些代理节点（特别是基于 WebSocket 且启用了某种 WAF/Cloudflare 的节点）
+	// 或者目标网站可能会拦截没有 User-Agent 的请求
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
 	start := time.Now()
 	resp, err := httpClient.Do(req)
 	latency := int(time.Since(start).Milliseconds())
