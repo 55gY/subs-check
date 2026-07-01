@@ -54,10 +54,18 @@ func CreateClient(proxyMap map[string]any) *ProxyClient {
 	transport.MaxIdleConnsPerHost = 0
 
 	return &ProxyClient{
-		Client: &http.Client{Transport: transport},
-		proxy:  proxyURL,
+		Client:    &http.Client{Transport: transport},
+		BytesRead: new(uint64),
+		proxy:     proxyURL,
 	}
 }
 
 func (c *ProxyClient) Close() {
+	if c.Client != nil {
+		// 关闭Transport的空闲连接，释放网络资源
+		if transport, ok := c.Client.Transport.(*http.Transport); ok {
+			transport.CloseIdleConnections()
+		}
+		c.Client.CloseIdleConnections()
+	}
 }

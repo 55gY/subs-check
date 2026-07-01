@@ -103,9 +103,18 @@ func (app *App) initHttpServer() error {
 
 	// 启动HTTP服务器
 	go func() {
+		const maxRetries = 5
+		retries := 0
 		for {
 			if err := router.Run(config.GlobalConfig.ListenPort); err != nil {
-				slog.Error(fmt.Sprintf("HTTP服务器启动失败，正在重启中: %v", err))
+				retries++
+				if retries >= maxRetries {
+					slog.Error(fmt.Sprintf("HTTP服务器启动失败，已达最大重试次数(%d): %v", maxRetries, err))
+					return
+				}
+				slog.Error(fmt.Sprintf("HTTP服务器启动失败，正在重启中(%d/%d): %v", retries, maxRetries, err))
+			} else {
+				retries = 0 // 正常退出后重置计数
 			}
 			time.Sleep(30 * time.Second)
 		}
@@ -175,7 +184,12 @@ func constantTimeEqual(provided, expected string) bool {
 }
 
 func GenerateSimpleKey() string {
-	return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	}
+	// 生成8位十六进制字符串，比6位纯数字更安全
+	return fmt.Sprintf("%x", b)
 }
 
 func GenerateSecureToken() string {

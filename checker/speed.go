@@ -161,8 +161,17 @@ func CheckSpeed(ctx context.Context, httpClient *http.Client, bytesCounter *uint
 		durationMs = 1
 	}
 
-	// 计算速度（KB/s），使用实际网络传输的字节数
-	metrics.SpeedKBps = int(float64(actualBytes) / 1024 * 100 / float64(durationMs))
+	// 计算速度（KB/s），优先使用实际网络传输字节数，fallback到io.Copy读取的字节数
+	speedBytes := actualBytes
+	if speedBytes <= 0 {
+		speedBytes = totalBytes
+	}
+	metrics.SpeedKBps = int(float64(speedBytes) / 1024 * 100 / float64(durationMs))
+
+	// 更新全局流量统计
+	if speedBytes > 0 {
+		TotalBytes.Add(uint64(speedBytes))
+	}
 
 	return metrics, nil
 }

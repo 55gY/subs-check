@@ -26,12 +26,12 @@ type App struct {
 	configPath  string
 	interval    int
 	watcher     *fsnotify.Watcher
-	checkChan   chan struct{} // 触发检测的通道
-	checking    atomic.Bool   // 检测状态标志
+	checking    atomic.Bool   // 检测状态标志（CAS互斥）
 	stopping    atomic.Bool   // 停止中状态标志
 	configMutex sync.Mutex    // 保护 config.yaml 文件的读写
 	ticker      *time.Ticker
-	done        chan struct{} // 用于结束ticker goroutine的信号
+	tickerStop  chan struct{} // 用于停止ticker goroutine的信号（不影响主循环）
+	done        chan struct{} // 用于结束主循环的信号（仅应用退出时关闭）
 	cron        *cron.Cron    // crontab调度器
 	version     string
 }
@@ -43,8 +43,8 @@ func New(version string) *App {
 
 	return &App{
 		configPath: *configPath,
-		checkChan:  make(chan struct{}),
 		done:       make(chan struct{}),
+		tickerStop: make(chan struct{}),
 		version:    version,
 	}
 }
@@ -123,22 +123,20 @@ func (app *App) Run() {
 	if config.GlobalConfig.CronExpression != "" {
 		slog.Warn("使用cron表达式，首次启动不立即执行检测")
 	} else {
-		app.triggerCheck()
+		app.TriggerCheck()
 	}
 
-	// 在主循环中处理手动触发
-	for range app.checkChan {
-		go app.triggerCheck()
-	}
+	// 主循环阻塞等待退出信号
+	<-app.done
 }
 
 // setTimer 根据配置设置定时器
 func (app *App) setTimer() {
-	// 停止现有定时器
+	// 停止现有定时器goroutine
 	if app.ticker != nil {
-		// 应该先发送停止信号，防止被=nil后panic
-		close(app.done)                // 发送停止信号
-		app.done = make(chan struct{}) // 创建新通道
+		// 关闭tickerStop通知goroutine退出，而非关闭done（done仅用于主循环退出）
+		close(app.tickerStop)
+		app.tickerStop = make(chan struct{})
 		app.ticker.Stop()
 		app.ticker = nil
 	}
@@ -174,37 +172,43 @@ func (app *App) setTimer() {
 func (app *App) useIntervalTimer() {
 	// 初始化定时器
 	app.ticker = time.NewTicker(time.Duration(app.interval) * time.Minute)
-	done := app.done
+	tickerStop := app.tickerStop
 	// 启动一个goroutine监听定时器事件
 	go func() {
 		for {
 			select {
 			case <-app.ticker.C:
 				app.triggerCheck()
-			case <-done:
-				return // 收到停止信号，退出goroutine
+			case <-tickerStop:
+				return // 收到ticker停止信号，退出goroutine
 			}
 		}
 	}()
 }
 
-// TriggerCheck 供外部调用的触发检测方法
+// TriggerCheck 供外部调用的触发检测方法（非阻塞）
+// 使用CAS互斥，若已有检测在运行则跳过
 func (app *App) TriggerCheck() {
-	select {
-	case app.checkChan <- struct{}{}:
-		slog.Info("手动触发检测")
-	default:
+	if !app.checking.CompareAndSwap(false, true) {
 		slog.Warn("已有检测正在进行，忽略本次触发")
+		return
 	}
+	slog.Info("手动触发检测")
+	go app.doCheck()
 }
 
-// triggerCheck 内部检测方法
+// triggerCheck 内部检测方法（同步，供定时器/cron回调使用）
+// 调用方已在独立goroutine中，无需再启动goroutine
 func (app *App) triggerCheck() {
-	// 如果已经在检测中，直接返回
 	if !app.checking.CompareAndSwap(false, true) {
 		slog.Warn("已有检测正在进行，跳过本次检测")
 		return
 	}
+	app.doCheck()
+}
+
+// doCheck 检测执行体（必须在CAS成功后调用）
+func (app *App) doCheck() {
 	app.stopping.Store(false)
 	defer func() {
 		app.checking.Store(false)
@@ -236,6 +240,8 @@ func (app *App) triggerCheck() {
 func (app *App) MarkStopping() {
 	if app.checking.Load() {
 		app.stopping.Store(true)
+		// 同时设置ForceClose，使pipeline各阶段能响应停止信号
+		checker.ForceClose.Store(true)
 	}
 }
 
@@ -275,14 +281,20 @@ func persistResults(results []checker.Result) error {
 	}
 
 	hasSpeedStage := strings.TrimSpace(config.GlobalConfig.SpeedTestUrl) != ""
+	hasMediaStage := config.GlobalConfig.MediaCheck
+
+	// TestStage 基于pipeline配置确定，而非结果数据
+	// pipeline重构后：所有节点都经过相同的最深阶段
+	defaultTestStage := output.TestAlive
+	if hasMediaStage {
+		defaultTestStage = output.TestMedia
+	} else if hasSpeedStage {
+		defaultTestStage = output.TestSpeed
+	}
+
 	records := make([]output.DBNodeRecord, 0, len(results))
 	for i := range results {
-		testStage := output.TestAlive
-		if hasMediaData(results[i]) {
-			testStage = output.TestMedia
-		} else if hasSpeedStage {
-			testStage = output.TestSpeed
-		}
+		testStage := defaultTestStage
 
 		results[i].Batch = output.BatchCurrent
 		results[i].TestStage = testStage
@@ -308,16 +320,7 @@ func persistResults(results []checker.Result) error {
 	return db.ReplaceCurrentBatch(records)
 }
 
-func hasMediaData(result checker.Result) bool {
-	return result.Openai ||
-		result.OpenaiWeb ||
-		len(strings.TrimSpace(result.Youtube)) > 0 ||
-		result.Netflix ||
-		result.Disney ||
-		result.Gemini ||
-		len(strings.TrimSpace(result.TikTok)) > 0 ||
-		len(strings.TrimSpace(result.IPRisk)) > 0
-}
+
 
 func TempLog() string {
 	return filepath.Join(os.TempDir(), "subs-check.log")

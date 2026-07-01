@@ -116,9 +116,30 @@ var DefaultConfigTemplate []byte
 // GlobalConfigPath 全局配置文件路径
 var GlobalConfigPath string
 
-// DeduplicateSubUrls 去除配置文件中sub-urls的重复项（保留注释和格式）
-func DeduplicateSubUrls(configPath string) error {
-	// 读取配置文件
+// extractSubUrlLine 从 YAML 列表项行中提取 URL 部分
+// 返回空字符串表示该行不是有效的列表项
+func extractSubUrlLine(line string) (url string, ok bool) {
+	if len(line) == 0 || line[0] != ' ' {
+		return "", false
+	}
+	for i, ch := range line {
+		if ch == '-' {
+			urlPart := strings.TrimSpace(line[i+1:])
+			urlPart = strings.Trim(urlPart, `"'`)
+			return urlPart, true
+		}
+	}
+	return "", false
+}
+
+// skipFunc 决定 sub-urls 中某行是否应跳过
+// url 是从行中提取的 URL，lineNum 是该行在 sub-urls 段内的序号
+type skipFunc func(url string, lineNum int) bool
+
+// processSubUrlsLines 通用 sub-urls 行级处理器
+// 遍历配置文件，对 sub-urls 段内的每个列表项调用 shouldSkip 决定是否跳过，
+// 然后写回剩余行。保留注释和格式。
+func processSubUrlsLines(configPath string, shouldSkip skipFunc) error {
 	file, err := os.Open(configPath)
 	if err != nil {
 		return fmt.Errorf("打开配置文件失败: %w", err)
@@ -128,7 +149,7 @@ func DeduplicateSubUrls(configPath string) error {
 	var newLines []string
 	scanner := bufio.NewScanner(file)
 	inSubUrls := false
-	seenUrls := make(map[string]bool) // 记录已经出现的URL
+	lineNum := 0
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -141,37 +162,18 @@ func DeduplicateSubUrls(configPath string) error {
 			continue
 		}
 
-		shouldSkip := false
+		skip := false
 		if inSubUrls {
-			// 检测缩进
-			if len(line) > 0 && line[0] == ' ' {
-				// 找到 sub-urls 下的项
-				for i, ch := range line {
-					if ch == '-' {
-						// 提取URL部分（去掉 "- " 和前后空格）
-						urlPart := strings.TrimSpace(line[i+1:])
-						// 去掉可能的引号
-						urlPart = strings.Trim(urlPart, `"'`)
-
-						// 检查是否重复
-						if seenUrls[urlPart] {
-							// 重复的URL，跳过这一行
-							shouldSkip = true
-						} else {
-							// 第一次出现，记录它
-							seenUrls[urlPart] = true
-						}
-						break
-					}
-				}
+			if url, ok := extractSubUrlLine(line); ok {
+				skip = shouldSkip(url, lineNum)
+				lineNum++
 			} else if len(line) > 0 && line[0] != ' ' && line[0] != '#' {
 				// 遇到新的顶级配置项，sub-urls 部分结束
 				inSubUrls = false
 			}
 		}
 
-		// 只有不需要跳过的行才添加
-		if !shouldSkip {
+		if !skip {
 			newLines = append(newLines, line)
 		}
 	}
@@ -180,96 +182,51 @@ func DeduplicateSubUrls(configPath string) error {
 		return fmt.Errorf("读取配置文件失败: %w", err)
 	}
 
-	// 写入更新后的配置
 	newContent := strings.Join(newLines, "\n")
 	if err := os.WriteFile(configPath, []byte(newContent), 0644); err != nil {
 		return fmt.Errorf("保存配置文件失败: %w", err)
 	}
 
 	return nil
+}
+
+// withConfigPath 检查全局配置路径后调用处理函数
+func withConfigPath(fn func(string) error) error {
+	if GlobalConfigPath == "" {
+		return fmt.Errorf("配置文件路径未设置")
+	}
+	return fn(GlobalConfigPath)
+}
+
+// DeduplicateSubUrls 去除配置文件中sub-urls的重复项（保留注释和格式）
+func DeduplicateSubUrls(configPath string) error {
+	seenUrls := make(map[string]bool)
+	return processSubUrlsLines(configPath, func(url string, _ int) bool {
+		if seenUrls[url] {
+			return true // 重复，跳过
+		}
+		seenUrls[url] = true
+		return false
+	})
 }
 
 // DeduplicateSubUrlsFromConfig 去除全局配置文件中sub-urls的重复项
 func DeduplicateSubUrlsFromConfig() error {
-	if GlobalConfigPath == "" {
-		return fmt.Errorf("配置文件路径未设置")
-	}
-	return DeduplicateSubUrls(GlobalConfigPath)
-}
-
-// RemoveSubUrlFromConfig 从配置文件中删除指定的订阅链接（保留注释和格式）
-func RemoveSubUrlFromConfig(subUrl string) error {
-	if GlobalConfigPath == "" {
-		return fmt.Errorf("配置文件路径未设置")
-	}
-	return RemoveSubUrl(GlobalConfigPath, subUrl)
+	return withConfigPath(DeduplicateSubUrls)
 }
 
 // RemoveSubUrl 从配置文件中删除指定的订阅链接（保留注释和格式）
 func RemoveSubUrl(configPath, subUrl string) error {
-	// 读取配置文件
-	file, err := os.Open(configPath)
-	if err != nil {
-		return fmt.Errorf("打开配置文件失败: %w", err)
-	}
-	defer file.Close()
+	return processSubUrlsLines(configPath, func(url string, _ int) bool {
+		return url == subUrl
+	})
+}
 
-	var newLines []string
-	scanner := bufio.NewScanner(file)
-	inSubUrls := false
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmedLine := strings.TrimSpace(line)
-
-		// 检测 sub-urls 部分
-		if !inSubUrls && (trimmedLine == "sub-urls:" || trimmedLine == "sub-urls: []") {
-			inSubUrls = true
-			newLines = append(newLines, line)
-			continue
-		}
-
-		shouldSkip := false
-		if inSubUrls {
-			// 检测缩进
-			if len(line) > 0 && line[0] == ' ' {
-				// 找到 sub-urls 下的项
-				for i, ch := range line {
-					if ch == '-' {
-						// 提取URL部分（去掉 "- " 和前后空格）
-						urlPart := strings.TrimSpace(line[i+1:])
-						// 去掉可能的引号
-						urlPart = strings.Trim(urlPart, `"'`)
-						// 如果这行包含要删除的URL，标记跳过这一行
-						if urlPart == subUrl {
-							shouldSkip = true
-						}
-						break
-					}
-				}
-			} else if len(line) > 0 && line[0] != ' ' && line[0] != '#' {
-				// 遇到新的顶级配置项，sub-urls 部分结束
-				inSubUrls = false
-			}
-		}
-
-		// 只有不需要跳过的行才添加
-		if !shouldSkip {
-			newLines = append(newLines, line)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("读取配置文件失败: %w", err)
-	}
-
-	// 写入更新后的配置
-	newContent := strings.Join(newLines, "\n")
-	if err := os.WriteFile(configPath, []byte(newContent), 0644); err != nil {
-		return fmt.Errorf("保存配置文件失败: %w", err)
-	}
-
-	return nil
+// RemoveSubUrlFromConfig 从配置文件中删除指定的订阅链接（保留注释和格式）
+func RemoveSubUrlFromConfig(subUrl string) error {
+	return withConfigPath(func(path string) error {
+		return RemoveSubUrl(path, subUrl)
+	})
 }
 
 // FailureRecord 失败记录结构
@@ -342,6 +299,19 @@ func WriteFailureRecord(records map[string]int) error {
 	return nil
 }
 
+// updateFailureRecord 读取-修改-写入失败记录的通用函数
+// modify 对记录进行修改，返回 true 表示需要写回文件
+func updateFailureRecord(modify func(records map[string]int) bool) error {
+	records, err := ReadFailureRecord()
+	if err != nil {
+		return err
+	}
+	if modify(records) {
+		return WriteFailureRecord(records)
+	}
+	return nil
+}
+
 // IncrementFailureCount 增加失败次数
 func IncrementFailureCount(subUrl string) (int, error) {
 	records, err := ReadFailureRecord()
@@ -349,13 +319,10 @@ func IncrementFailureCount(subUrl string) (int, error) {
 		return 0, err
 	}
 
-	// 增加失败次数
 	records[subUrl]++
 	currentCount := records[subUrl]
 
-	// 保存更新后的记录
-	err = WriteFailureRecord(records)
-	if err != nil {
+	if err := WriteFailureRecord(records); err != nil {
 		return currentCount, err
 	}
 
@@ -364,22 +331,17 @@ func IncrementFailureCount(subUrl string) (int, error) {
 
 // ResetFailureCount 重置失败次数（成功获取时调用）
 func ResetFailureCount(subUrl string) error {
-	records, err := ReadFailureRecord()
-	if err != nil {
-		return err
-	}
-
-	// 如果该URL存在失败记录，删除它
-	if _, exists := records[subUrl]; exists {
-		delete(records, subUrl)
-		return WriteFailureRecord(records)
-	}
-
-	return nil
+	return updateFailureRecord(func(records map[string]int) bool {
+		if _, exists := records[subUrl]; exists {
+			delete(records, subUrl)
+			return true
+		}
+		return false
+	})
 }
 
 // ShouldRemoveFailedSub 检查是否应该删除失败的订阅
-func ShouldRemoveFailedSub(subUrl string, failureCount int) bool {
+func ShouldRemoveFailedSub(failureCount int) bool {
 	retryConfig := GlobalConfig.SubUrlsRetryFailed
 
 	// < 0: 永不删除

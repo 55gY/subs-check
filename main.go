@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,6 +21,10 @@ func main() {
 	slog.Info(fmt.Sprintf("当前版本: %s-%s", Version, CurrentCommit))
 
 	if err := application.Initialize(); err != nil {
+		if errors.Is(err, core.ErrConfigCreated) {
+			// 默认配置已创建，正常退出（允许defer清理）
+			os.Exit(0)
+		}
 		slog.Error(fmt.Sprintf("初始化失败: %v", err))
 		os.Exit(1)
 	}

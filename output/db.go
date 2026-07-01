@@ -20,14 +20,22 @@ type DB struct {
 
 var (
 	dbInstance *DB
-	dbOnce     sync.Once
+	dbMu       sync.Mutex
 	dbInitErr  error
+	dbInitDone bool
 )
 
 func GetDB() (*DB, error) {
-	dbOnce.Do(func() {
-		dbInstance, dbInitErr = OpenDB()
-	})
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	if dbInitDone {
+		if dbInitErr != nil {
+			return nil, dbInitErr
+		}
+		return dbInstance, nil
+	}
+	dbInstance, dbInitErr = OpenDB()
+	dbInitDone = dbInitErr == nil // 仅成功时缓存，失败时允许重试
 	if dbInitErr != nil {
 		return nil, dbInitErr
 	}

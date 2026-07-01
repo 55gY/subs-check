@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/55gY/subs-check/config"
@@ -132,9 +133,13 @@ func (app *App) createDefaultConfig() error {
 
 	slog.Info("默认配置文件创建成功")
 	slog.Info(fmt.Sprintf("请编辑配置文件: %s", app.configPath))
-	os.Exit(0)
-	return nil
+	// 返回特殊错误，让调用方决定是否退出（而非硬退出绕过defer清理）
+	return ErrConfigCreated
 }
+
+// ErrConfigCreated 表示默认配置已创建，需要用户编辑后重启
+// 调用方可通过 errors.Is 检查此错误来决定退出方式（而非硬退出）
+var ErrConfigCreated = fmt.Errorf("默认配置文件已创建，请编辑后重启")
 
 // initConfigWatcher 初始化配置文件监听
 func (app *App) initConfigWatcher() error {
@@ -147,6 +152,7 @@ func (app *App) initConfigWatcher() error {
 
 	// 防抖定时器，防止vscode等软件先临时创建文件在覆盖，会产生两次write事件
 	var debounceTimer *time.Timer
+	var debounceMu sync.Mutex
 	go func() {
 		for {
 			select {
@@ -159,6 +165,7 @@ func (app *App) initConfigWatcher() error {
 				}
 				// 兼容容器外修改
 				if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
+					debounceMu.Lock()
 					// 如果定时器存在，重置它
 					if debounceTimer != nil {
 						debounceTimer.Stop()
@@ -166,6 +173,8 @@ func (app *App) initConfigWatcher() error {
 
 					// 创建新的定时器，延迟100ms执行
 					debounceTimer = time.AfterFunc(100*time.Millisecond, func() {
+						debounceMu.Lock()
+						defer debounceMu.Unlock()
 						slog.Info("配置文件发生变化，正在重新加载")
 						oldCronExpr := config.GlobalConfig.CronExpression
 						oldInterval := app.interval
@@ -204,6 +213,7 @@ func (app *App) initConfigWatcher() error {
 							app.setTimer()
 						}
 					})
+					debounceMu.Unlock()
 				}
 			case err, ok := <-watcher.Errors:
 				if !ok {
