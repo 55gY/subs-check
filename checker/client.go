@@ -1,17 +1,54 @@
 package checker
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/juju/ratelimit"
 )
 
 type ProxyClient struct {
 	Client    *http.Client
 	BytesRead *uint64
 	proxy     string
+}
+
+// statsConn 网络层连接包装器，用于追踪实际网络传输字节数并实现速率限制
+type statsConn struct {
+	net.Conn
+	bytesCounter *uint64
+	bucket       *ratelimit.Bucket
+}
+
+func (c *statsConn) Read(p []byte) (n int, err error) {
+	n, err = c.Conn.Read(p)
+	if n > 0 {
+		atomic.AddUint64(c.bytesCounter, uint64(n))
+		// 速率限制：通过全局 Bucket 控制读取速率（网络层）
+		if c.bucket != nil {
+			c.bucket.Wait(int64(n))
+		}
+	}
+	return
+}
+
+func (c *statsConn) Write(p []byte) (n int, err error) {
+	n, err = c.Conn.Write(p)
+	if n > 0 {
+		// 写入字节数不计入 BytesRead（BytesRead 仅统计下载流量）
+		// 速率限制同样应用于写入
+		if c.bucket != nil {
+			c.bucket.Wait(int64(n))
+		}
+	}
+	return
 }
 
 func CreateClient(proxyMap map[string]any) *ProxyClient {
@@ -44,6 +81,8 @@ func CreateClient(proxyMap map[string]any) *ProxyClient {
 
 	proxyURL := fmt.Sprintf("http://%s:%d", host, port)
 
+	bytesRead := new(uint64)
+
 	transport := &http.Transport{}
 	if parsed, err := url.Parse(proxyURL); err == nil {
 		transport.Proxy = http.ProxyURL(parsed)
@@ -53,9 +92,26 @@ func CreateClient(proxyMap map[string]any) *ProxyClient {
 	transport.MaxIdleConns = 0
 	transport.MaxIdleConnsPerHost = 0
 
+	// 自定义 DialContext：包装连接为 statsConn，追踪网络层字节数并实现速率限制
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+		conn, err := dialer.DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return &statsConn{
+			Conn:         conn,
+			bytesCounter: bytesRead,
+			bucket:       Bucket,
+		}, nil
+	}
+
 	return &ProxyClient{
 		Client:    &http.Client{Transport: transport},
-		BytesRead: new(uint64),
+		BytesRead: bytesRead,
 		proxy:     proxyURL,
 	}
 }

@@ -166,7 +166,11 @@ func CheckSpeed(ctx context.Context, httpClient *http.Client, bytesCounter *uint
 	if speedBytes <= 0 {
 		speedBytes = totalBytes
 	}
-	metrics.SpeedKBps = int(float64(speedBytes) / 1024 * 100 / float64(durationMs))
+	metrics.SpeedKBps = int(float64(speedBytes) / 1024 * 1000 / float64(durationMs))
+
+	// 调试日志：输出字节统计详情，便于排查流量统计问题
+	slog.Debug(fmt.Sprintf("测速字节统计: actualBytes=%d totalBytes=%d speedBytes=%d durationMs=%d speedKBps=%d",
+		actualBytes, totalBytes, speedBytes, durationMs, metrics.SpeedKBps))
 
 	// 更新全局流量统计
 	if speedBytes > 0 {
