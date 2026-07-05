@@ -224,11 +224,56 @@ check_dependencies() {
     fi
 }
 
-# 获取最新版本下载链接（包括 Pre-release）
+# 获取最新版本下载链接
+fetch_github_api() {
+    local api_url="$1"
+
+    if command -v curl &> /dev/null; then
+        curl -fsSL \
+             -H "Accept: application/vnd.github+json" \
+             -H "Cache-Control: no-cache" \
+             "$api_url"
+    else
+        wget -qO- \
+             --header="Accept: application/vnd.github+json" \
+             --header="Cache-Control: no-cache" \
+             "$api_url"
+    fi
+}
+
+extract_release_download_url() {
+    local release_json="$1"
+    local os_pattern="$2"
+    local arch_pattern="$3"
+    local require_build_number="${4:-0}"
+    local download_url
+
+    download_url=$(printf '%s' "$release_json" |
+        grep -o '"browser_download_url": *"[^"]*'"${os_pattern}"'[^"]*'"${arch_pattern}"'[^"]*\.tar\.gz"' |
+        sed 's/"browser_download_url": *"\([^"]*\)"/\1/' |
+        while IFS= read -r url; do
+            local build_number
+            build_number=$(printf '%s' "$url" | sed -n 's#.*\/download\/v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*-\([0-9][0-9]*\)\/.*#\1#p')
+            if [ "$require_build_number" = "1" ] && [ -z "$build_number" ]; then
+                continue
+            fi
+            [ -n "$build_number" ] || build_number=0
+            printf '%s\t%s\n' "$build_number" "$url"
+        done |
+        sort -rn |
+        head -n 1 |
+        cut -f2- |
+        tr -d '\r\n')
+
+    echo "$download_url"
+}
+
 get_latest_release_url() {
     echo -e "${BLUE}正在获取最新版本信息...${NC}" >&2
     
-    local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases"
+    local latest_api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+    local releases_api_url="https://api.github.com/repos/${GITHUB_REPO}/releases"
+    local release_json
     local download_url
     
     # 检测系统架构
@@ -268,21 +313,17 @@ get_latest_release_url() {
     
     echo -e "${CYAN}检测到系统: ${os_pattern} ${arch_pattern}${NC}" >&2
     
-    # 获取所有 releases（包括 pre-release），查找匹配当前系统的下载链接
-    if command -v curl &> /dev/null; then
-        # 首先尝试精确匹配系统和架构
-        download_url=$(curl -s "$api_url" | grep -o '"browser_download_url": *"[^"]*'"${os_pattern}"'[^"]*'"${arch_pattern}"'[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
-        
-        # 如果没找到，尝试只匹配 tar.gz（兼容旧版本）
-        if [ -z "$download_url" ]; then
-            download_url=$(curl -s "$api_url" | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
-        fi
-    else
-        # 使用 wget 获取
-        download_url=$(wget -qO- "$api_url" | grep -o '"browser_download_url": *"[^"]*'"${os_pattern}"'[^"]*'"${arch_pattern}"'[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
-        
-        if [ -z "$download_url" ]; then
-            download_url=$(wget -qO- "$api_url" | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' | head -n 1 | sed 's/"browser_download_url": *"\([^"]*\)"/\1/' | tr -d '\r\n')
+    # 优先从所有 releases 中选择最高构建号，避免回退 commit 后 GitHub API 列表顺序拿到旧版本。
+    release_json=$(fetch_github_api "$releases_api_url" 2>/dev/null || true)
+    if [ -n "$release_json" ]; then
+        download_url=$(extract_release_download_url "$release_json" "$os_pattern" "$arch_pattern" "1")
+    fi
+
+    # 如果没有 v0.0.0-N 构建资产，则回退到 GitHub 标记为 Latest 的 release。
+    if [ -z "$download_url" ]; then
+        release_json=$(fetch_github_api "$latest_api_url" 2>/dev/null || true)
+        if [ -n "$release_json" ]; then
+            download_url=$(extract_release_download_url "$release_json" "$os_pattern" "$arch_pattern")
         fi
     fi
     
@@ -587,7 +628,7 @@ cmd_install() {
     
     # 下载二进制文件
     if [ ! -f "$BINARY_PATH" ]; then
-        download_url=$(get_latest_release_url)
+        local download_url=$(get_latest_release_url)
         download_binary "$download_url"
     else
         echo -e "${GREEN}✓ 二进制文件已存在${NC}"
@@ -650,13 +691,13 @@ cmd_upgrade() {
     
     # 备份旧版本
     if [ -f "$BINARY_PATH" ]; then
-        backup_file="${BINARY_PATH}.backup.$(date +%Y%m%d%H%M%S)"
+        local backup_file="${BINARY_PATH}.backup.$(date +%Y%m%d%H%M%S)"
         echo -e "${YELLOW}备份旧版本到: ${backup_file}${NC}"
         cp "$BINARY_PATH" "$backup_file"
     fi
     
     # 下载新版本
-    download_url=$(get_latest_release_url)
+    local download_url=$(get_latest_release_url)
     download_binary "$download_url"
     
     # 重新创建服务（可能有更新）
