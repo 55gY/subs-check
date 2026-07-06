@@ -1,0 +1,252 @@
+# subs-check 修复计划
+
+## 问题概述
+
+### 问题1: 拉取的订阅无法使用
+**根因**: commit 77fdd17 将 `checker/client.go` 简化为 HTTP CONNECT 代理方式，替代了原始的 mihomo 协议适配代理。当前 `CreateClient()` 仅创建 `http.Transport{Proxy: http.ProxyURL(parsed)}` 的 HTTP 代理，对 SS/VMess/VLESS/Trojan 等非 HTTP 协议代理无法正确建立连接。存活检测通过是因为 CDN 节点对 HTTP 请求有响应（假阳性），但实际使用时无法建立代理隧道。
+
+**原始实现** (894aae5~1 版本 `checker/worker.go`):
+- 使用 `adapter.ParseProxy(mapping)` 创建协议适配代理
+- 通过 `proxy.DialContext()` 建立真实代理连接
+- `statsConn` 实现网络层字节计数和速率限制
+- `Close()` 调用 `proxy.Close()` 释放底层连接
+
+**当前实现** (`checker/client.go`):
+- 仅创建 HTTP CONNECT 代理传输层
+- 不支持 SS/VMess/VLESS/Trojan 等协议
+- `Close()` 为空函数
+- 无字节计数功能
+
+### 问题2: 拉取的订阅中出现异常字符
+**根因**: SS 订阅源 base64 编码异常 → `convert.ConvertsV2Ray` 解析产生 U+FFFD 替换字符 → cipher 字段乱码。`parseSubscriptionNodes` 无字符清洗步骤。
+
+### 问题3: 节点没有重命名
+**根因**: `updateProxyName()` 函数已存在于 `checker/pipeline.go` 中，但从未被调用。原始 `worker.go` 中的 `aliveWorker`/`speedWorker`/`mediaWorker` 会调用 `updateProxyName()`，但当前 `pipeline.go` 的 `Check()` 函数中未调用此函数。
+
+---
+
+## 修复任务
+
+### 任务1: 恢复 mihomo 协议适配代理客户端 [核心/高优先级]
+**文件**: `subs-check/checker/client.go`
+**状态**: ✅ 已完成 (2026-07-06)
+
+**具体修改**:
+1. 恢复 `ProxyClient` 结构体，包含 `constant.Proxy` 字段和 `BytesRead` 字段
+2. 恢复 `statsConn` 类型，包装 `net.Conn` 实现字节计数和速率限制
+3. 恢复 `CreateClient()` 使用 `adapter.ParseProxy(mapping)` 创建协议适配代理
+4. 恢复 `Close()` 方法，调用 `proxy.Close()` 释放连接并统计 `TotalBytes`
+5. 添加必要的 import: `adapter`, `constant`, `net`, `strconv`, `sync/atomic`, `time`
+
+**参考实现** (894aae5~1 版本 `checker/worker.go` 第344-424行):
+```go
+type statsConn struct {
+    net.Conn
+    bytesRead *uint64
+    bucket    *ratelimit.Bucket
+}
+
+func (c *statsConn) Read(b []byte) (n int, err error) {
+    if c.bucket != nil {
+        c.bucket.Wait(int64(len(b)))
+    }
+    n, err = c.Conn.Read(b)
+    atomic.AddUint64(c.bytesRead, uint64(n))
+    return n, err
+}
+
+type ProxyClient struct {
+    *http.Client
+    proxy     constant.Proxy
+    BytesRead *uint64
+}
+
+func CreateClient(mapping map[string]any) *ProxyClient {
+    defer func() {
+        if r := recover(); r != nil {
+            slog.Debug(fmt.Sprintf("CreateClient发生panic: %v, proxy: %v", r, mapping["name"]))
+        }
+    }()
+    proxy, err := adapter.ParseProxy(mapping)
+    if err != nil {
+        slog.Debug(fmt.Sprintf("底层mihomo创建代理Client失败: %v", err))
+        return nil
+    }
+    var bytesRead uint64
+    baseTransport := &http.Transport{
+        DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+            host, port, err := net.SplitHostPort(addr)
+            if err != nil { return nil, err }
+            var u16Port uint16
+            if port, err := strconv.ParseUint(port, 10, 16); err == nil {
+                u16Port = uint16(port)
+            }
+            conn, err := proxy.DialContext(ctx, &constant.Metadata{
+                Host:    host,
+                DstPort: u16Port,
+            })
+            if err != nil { return nil, err }
+            return &statsConn{Conn: conn, bytesRead: &bytesRead, bucket: Bucket}, nil
+        },
+        DisableKeepAlives: true,
+    }
+    return &ProxyClient{
+        Client: &http.Client{
+            Timeout:   time.Duration(config.GlobalConfig.Timeout) * time.Millisecond,
+            Transport: baseTransport,
+        },
+        proxy:     proxy,
+        BytesRead: &bytesRead,
+    }
+}
+
+func (pc *ProxyClient) Close() {
+    defer func() {
+        if r := recover(); r != nil {
+            slog.Debug(fmt.Sprintf("Close发生panic: %v", r))
+        }
+    }()
+    if pc.Client != nil { pc.Client.CloseIdleConnections() }
+    if pc.proxy != nil { pc.proxy.Close() }
+    pc.Client = nil
+    if pc.BytesRead != nil { TotalBytes.Add(atomic.LoadUint64(pc.BytesRead)) }
+}
+```
+
+**编译校验**: 修改完成后执行 `go build ./...` 确认编译通过
+
+---
+
+### 任务2: 接入 updateProxyName 节点重命名功能 [高优先级]
+**文件**: `subs-check/checker/pipeline.go`
+**状态**: ✅ 已完成 (2026-07-06)
+
+**具体修改**:
+1. 在 `Check()` 函数中，存活检测通过后、添加到 results 之前，调用 `updateProxyName()`
+2. `updateProxyName()` 已存在于 pipeline.go 中（第243行），只需在正确位置调用
+3. 调用位置: 在 `item := Result{Proxy: proxyMap}` 之后，`mu.Lock()` 之前
+4. 如果 `updateProxyName` 返回 true（应被过滤），跳过该节点
+
+**修改位置** (pipeline.go Check() 函数中约第159行后):
+```go
+item := Result{Proxy: proxyMap}
+
+// 调用节点重命名和过滤
+skip := updateProxyName(ctx, &item, client.Client, item.SpeedKBps)
+if skip {
+    tracker.CountAlive(false)
+    return
+}
+
+if speedON { ... }
+if mediaON { ... }
+
+mu.Lock()
+results = append(results, item)
+mu.Unlock()
+```
+
+**注意**: 需要确保 `updateProxyName` 在测速和媒体检测之后调用（因为需要 speed 和 media 结果），或者在存活检测后先做重命名，测速/媒体后更新标签。当前 `updateProxyName` 的逻辑是：先重命名（如果配置了 RenameNode），然后添加速度和媒体标签。因此应该在所有检测完成后调用。
+
+**正确调用位置**: 在 `mu.Lock()` 之前，所有检测完成后：
+```go
+// 所有检测完成后，更新节点名称（重命名+标签）
+updateProxyName(ctx, &item, client.Client, item.SpeedKBps)
+
+mu.Lock()
+results = append(results, item)
+mu.Unlock()
+```
+
+**编译校验**: 修改完成后执行 `go build ./...` 确认编译通过
+
+---
+
+### 任务3: 修复异常字符问题 [中优先级]
+**文件**: `subs-check/provider/process.go` 或 `subs-check/provider/fetch.go`
+**状态**: ✅ 已完成 (2026-07-06)
+
+**具体修改**:
+1. 在订阅解析后（`convert.ConvertsV2Ray` 返回结果后），添加字符清洗步骤
+2. 清洗 proxyMap 中所有字符串值，移除 U+FFFD 替换字符和无效 UTF-8 序列
+3. 特别关注 `cipher`、`password`、`name` 等字段
+
+**新增函数** (在 process.go 中):
+```go
+// cleanProxyStrings 清洗代理映射中的无效字符
+func cleanProxyStrings(proxy map[string]any) {
+    for key, val := range proxy {
+        if s, ok := val.(string); ok {
+            // 移除 U+FFFD 替换字符
+            cleaned := strings.Map(func(r rune) rune {
+                if r == '\uFFFD' {
+                    return -1 // 移除
+                }
+                return r
+            }, s)
+            if cleaned != s {
+                proxy[key] = cleaned
+            }
+        }
+    }
+}
+```
+
+**调用位置**: 在 `GetProxies()` 返回结果前，或在 `DeduplicateProxies` 中调用
+也可以在 fetch.go 的每个 proxy 发送到 proxyChan 之前调用
+
+**编译校验**: 修改完成后执行 `go build ./...` 确认编译通过
+
+---
+
+### 任务4: 修复 pipeline.go 中 CheckAlive 使用 client.Client 的兼容性 [高优先级]
+**文件**: `subs-check/checker/pipeline.go`
+**状态**: ✅ 已确认兼容 (2026-07-06)
+
+**背景**: 恢复 mihomo 代理客户端后，`ProxyClient` 嵌入了 `*http.Client`（而非之前简化版的独立 `Client` 字段），需要确保 pipeline.go 中的调用方式兼容。
+
+**具体修改**:
+1. 当前 pipeline.go 中使用 `client.Client`，恢复后 `ProxyClient` 嵌入 `*http.Client`，访问方式变为 `client.Client` 仍然有效（嵌入字段的访问方式不变）
+2. 但 `CheckAlive(ctx, client.Client)` 和 `CheckSpeed(ctx, client.Client, client.BytesRead)` 的参数类型需要确认
+3. 恢复后 `client.Client` 类型是 `*http.Client`（嵌入），`client.BytesRead` 类型是 `*uint64`，与当前调用方式兼容
+
+**验证点**: 确认 `ProxyClient` 结构体字段访问方式与 pipeline.go 中的调用一致
+
+**编译校验**: 修改完成后执行 `go build ./...` 确认编译通过
+
+---
+
+## 实施顺序
+
+1. **任务1** → 恢复 mihomo 协议适配代理客户端（核心问题，必须先修复）
+2. **任务4** → 确认 pipeline.go 兼容性（任务1的后续验证）
+3. **任务2** → 接入 updateProxyName 节点重命名
+4. **任务3** → 修复异常字符问题
+
+每个任务完成后：
+- 执行 `go build ./...` 编译校验
+- 更新本文件中对应任务的状态标记
+- 如编译失败，修复问题后重新校验
+
+---
+
+## 风险与注意事项
+
+1. **mihomo adapter.ParseProxy 兼容性**: 需确认当前 go.mod 中的 mihomo 版本 (v1.19.27) 的 `adapter.ParseProxy` API 签名与原始版本一致
+2. **panic 恢复**: 原始 `CreateClient` 有 defer recover 处理，部分代理类型可能导致 panic，必须保留
+3. **资源泄漏**: `Close()` 必须正确释放 proxy 连接，否则会导致文件描述符泄漏
+4. **速率限制**: `statsConn` 中的 `Bucket` 是全局变量，需确认在 pipeline.go 中已正确初始化（已确认在 Check() 中初始化）
+5. **updateProxyName 调用时机**: 必须在所有检测（存活+测速+媒体）完成后调用，因为需要 speed 和 media 结果来生成标签
+6. **异常字符清洗时机**: 应在解析后、去重前清洗，避免因乱码导致去重失效
+
+---
+
+## 变更日志
+
+| 日期 | 任务 | 状态 | 备注 |
+|------|------|------|------|
+| 2026-07-06 | 计划创建 | ✅ 完成 | 初始版本 |
+| 2026-07-06 | 任务1 | ✅ 完成 | 恢复mihomo协议适配代理客户端，go build ./... 编译通过 |
+| 2026-07-06 | 任务4 | ✅ 完成 | 确认ProxyClient嵌入*http.Client后pipeline.go调用方式兼容 |
+| 2026-07-06 | 任务2 | ✅ 完成 | 在Check()中接入updateProxyName调用，go build编译通过 |
+| 2026-07-06 | 任务3 | ✅ 完成 | 添加cleanProxyStrings/CleanProxies，在去重前调用，编译通过 |
