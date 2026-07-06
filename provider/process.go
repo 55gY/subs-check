@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -245,4 +246,32 @@ func similarity(a, b serverMeta) float64 {
 
 func same24(a, b serverMeta) bool {
 	return a.prefixOK && b.prefixOK && a.prefix24 == b.prefix24
+}
+
+// ==================== 字符清洗功能 ====================
+
+// cleanProxyStrings 清洗代理映射中的无效字符
+// 移除 U+FFFD 替换字符（常见于 base64 解码异常导致的乱码）
+// 以及其他无效 UTF-8 序列
+func cleanProxyStrings(proxy map[string]any) {
+	for key, val := range proxy {
+		if s, ok := val.(string); ok {
+			cleaned := strings.Map(func(r rune) rune {
+				if r == '\uFFFD' {
+					return -1 // 移除 U+FFFD 替换字符
+				}
+				return r
+			}, s)
+			if cleaned != s {
+				proxy[key] = cleaned
+			}
+		}
+	}
+}
+
+// CleanProxies 批量清洗代理列表中的无效字符
+func CleanProxies(proxies []map[string]any) {
+	for _, proxy := range proxies {
+		cleanProxyStrings(proxy)
+	}
 }

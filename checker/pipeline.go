@@ -92,6 +92,9 @@ func Check() ([]Result, error) {
 		}
 	}
 
+	// 清洗节点中的无效字符（U+FFFD等）
+	proxyutils.CleanProxies(proxies)
+
 	proxies = proxyutils.DeduplicateProxies(proxies)
 	proxyutils.SmartShuffleByServer(proxies, proxyutils.ShuffleConfig{})
 	slog.Info(fmt.Sprintf("去重并乱序后节点数量: %d", len(proxies)))
@@ -191,6 +194,12 @@ func Check() ([]Result, error) {
 				} else {
 					tracker.CountMediaWithResult(false, 0, false)
 				}
+			}
+
+			// 所有检测完成后，更新节点名称（重命名+标签）
+			skip := updateProxyName(ctx, &item, client.Client, item.SpeedKBps)
+			if skip {
+				return
 			}
 
 			mu.Lock()
