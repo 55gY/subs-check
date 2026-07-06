@@ -250,3 +250,5 @@ func cleanProxyStrings(proxy map[string]any) {
 | 2026-07-06 | 任务4 | ✅ 完成 | 确认ProxyClient嵌入*http.Client后pipeline.go调用方式兼容 |
 | 2026-07-06 | 任务2 | ✅ 完成 | 在Check()中接入updateProxyName调用，go build编译通过 |
 | 2026-07-06 | 任务3 | ✅ 完成 | 添加cleanProxyStrings/CleanProxies，在去重前调用，编译通过 |
+| 2026-07-06 | 日志修复 | ✅ 完成 | 增加"已测试"和"未测试"统计字段，让数量对得上 |
+| 2026-07-06 | 超时优化 | ✅ 完成 | 将硬编码120s超时改为根据节点数和并发数自动计算，最小120s最大1800s |

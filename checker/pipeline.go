@@ -53,6 +53,26 @@ var CurrentTracker *ProgressTracker
 var Bucket *ratelimit.Bucket
 var progressWeight ProgressWeight
 
+// calcCheckTimeout 根据节点数量和并发数自动计算检测超时时间
+// 公式: 批次数 × 每批平均耗时(2秒)，最小120秒，最大1800秒(30分钟)
+func calcCheckTimeout(nodeCount, concurrent int) time.Duration {
+	if concurrent <= 0 {
+		concurrent = 100
+	}
+	if nodeCount <= 0 {
+		return 120 * time.Second
+	}
+	batches := math.Ceil(float64(nodeCount) / float64(concurrent))
+	timeout := time.Duration(batches) * 2 * time.Second
+	if timeout < 120*time.Second {
+		timeout = 120 * time.Second
+	}
+	if timeout > 1800*time.Second {
+		timeout = 1800 * time.Second
+	}
+	return timeout
+}
+
 func Check() ([]Result, error) {
 	proxyutils.ResetRenameCounter()
 	ForceClose.Store(false)
@@ -125,21 +145,24 @@ func Check() ([]Result, error) {
 		return nil, fmt.Errorf("配置未正确加载")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	concurrent := config.GlobalConfig.GetAliveConcurrent()
+	if concurrent <= 0 {
+		concurrent = 5
+	}
+
+	checkTimeout := calcCheckTimeout(len(proxies), concurrent)
+	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 	defer cancel()
 
 	var results []Result
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	concurrent := config.GlobalConfig.GetAliveConcurrent()
-	if concurrent <= 0 {
-		concurrent = 5
-	}
 	sem := make(chan struct{}, concurrent)
 
 	slog.Info("======== 阶段1: 存活检测 ========")
 	tracker.SetStage(0, "存活检测")
-	tracker.SetTimeout(2 * time.Minute)
+	tracker.SetTimeout(checkTimeout)
+	slog.Info("存活检测超时配置", "节点数", len(proxies), "并发数", concurrent, "超时(秒)", int(checkTimeout.Seconds()))
 
 	for _, proxy := range proxies {
 		select {
@@ -216,32 +239,32 @@ finished:
 	runtime.GC()
 
 	totalNodes, aliveSuccessTotal, aliveDoneTotal, speedSuccessTotal, speedDoneTotal, mediaDoneTotal := tracker.GetStats()
-	slog.Info("阶段1完成", "阶段", "存活检测", "总数", totalNodes, "成功数", aliveSuccessTotal, "失败数", aliveDoneTotal-aliveSuccessTotal)
+	aliveFailedTotal := aliveDoneTotal - aliveSuccessTotal
+	untestedTotal := totalNodes - aliveDoneTotal
+	slog.Info("阶段1完成", "阶段", "存活检测", "总数", totalNodes, "已测试", aliveDoneTotal, "成功", aliveSuccessTotal, "失败", aliveFailedTotal, "未测试", untestedTotal)
 	if speedON {
 		slog.Info("======== 阶段2: 测速检测 ========")
-		slog.Info("阶段2开始", "阶段", "测速检测", "总数", aliveSuccessTotal)
-		slog.Info("阶段2完成", "阶段", "测速检测", "总数", aliveSuccessTotal, "成功数", speedSuccessTotal, "失败数", speedDoneTotal-speedSuccessTotal)
+		speedFailedTotal := speedDoneTotal - speedSuccessTotal
+		slog.Info("阶段2完成", "阶段", "测速检测", "总数", aliveSuccessTotal, "成功", speedSuccessTotal, "失败", speedFailedTotal)
 	}
 	if mediaON {
 		slog.Info("======== 阶段3: 媒体检测 ========")
-		slog.Info("阶段3开始", "阶段", "媒体检测", "总数", speedSuccessTotal)
-		slog.Info("阶段3完成", "阶段", "媒体检测", "总数", speedSuccessTotal, "成功数", mediaDoneTotal, "失败数", 0)
+		slog.Info("阶段3完成", "阶段", "媒体检测", "总数", speedSuccessTotal, "成功", mediaDoneTotal, "失败", 0)
 	}
 	slog.Info("阶段完成统计",
-		"阶段1-存活", fmt.Sprintf("总数=%d 成功=%d 失败=%d", totalNodes, aliveSuccessTotal, aliveDoneTotal-aliveSuccessTotal),
+		"阶段1-存活", fmt.Sprintf("总数=%d 已测试=%d 成功=%d 失败=%d 未测试=%d", totalNodes, aliveDoneTotal, aliveSuccessTotal, aliveFailedTotal, untestedTotal),
 		"阶段2-测速", fmt.Sprintf("总数=%d 成功=%d 失败=%d", aliveSuccessTotal, speedSuccessTotal, speedDoneTotal-speedSuccessTotal),
 		"阶段3-媒体", fmt.Sprintf("总数=%d 成功=%d 失败=%d", speedSuccessTotal, mediaDoneTotal, 0))
 	slog.Info("检测完成统计",
 		"总节点数", totalNodes,
-		"最终可用数", len(results),
-		"存活完成", aliveDoneTotal,
+		"已测试", aliveDoneTotal,
 		"存活成功", aliveSuccessTotal,
-		"存活失败", aliveDoneTotal-aliveSuccessTotal,
-		"测速完成", speedDoneTotal,
+		"存活失败", aliveFailedTotal,
+		"未测试", untestedTotal,
 		"测速成功", speedSuccessTotal,
 		"测速失败", speedDoneTotal-speedSuccessTotal,
 		"媒体完成", mediaDoneTotal,
-		"媒体失败", 0)
+		"最终可用数", len(results))
 	slog.Info(fmt.Sprintf("可用节点数量: %d", len(results)))
 	slog.Info(fmt.Sprintf("测试总消耗流量: %.3fGB", float64(TotalBytes.Load())/1024/1024/1024))
 
