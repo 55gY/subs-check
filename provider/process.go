@@ -45,9 +45,18 @@ var (
 )
 
 // Rename 根据国家代码生成节点名称
-// 格式: CountryCode
+// 格式: CountryCode 或 CountryCode+N (同国家第N个节点)
 func Rename(countryCode string, fraudScore int) string {
-	return countryCode
+	counterLock.Lock()
+	defer counterLock.Unlock()
+
+	counter[countryCode]++
+	count := counter[countryCode]
+
+	if count == 1 {
+		return countryCode
+	}
+	return fmt.Sprintf("%s%d", countryCode, count)
 }
 
 // GetFraudScoreLabel 根据 fraudScore 返回纯净度中文描述

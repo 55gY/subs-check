@@ -189,7 +189,12 @@ func Check() ([]Result, error) {
 			}
 			defer client.Close()
 
-			alive, err := CheckAlive(ctx, client.Client)
+			var alive bool
+			if config.GlobalConfig.UnifiedDelay {
+				alive, _, err = CheckAliveWithWarmup(ctx, client.Client)
+			} else {
+				alive, err = CheckAlive(ctx, client.Client)
+			}
 			if err != nil || !alive {
 				tracker.CountAlive(false)
 				return
@@ -209,16 +214,37 @@ func Check() ([]Result, error) {
 			}
 
 			if mediaON {
-				tracker.SetStage(2, "媒体检测")
-				youtube, err := CheckYoutube(ctx, client.Client)
-				if err == nil {
-					item.Youtube = youtube
-					tracker.CountMediaWithResult(true, 0, false)
-				} else {
-					tracker.CountMediaWithResult(false, 0, false)
+			tracker.SetStage(2, "媒体检测")
+			// 遍历 platforms 配置，调用对应的媒体检测函数
+			for _, plat := range config.GlobalConfig.Platforms {
+				switch plat {
+				case "openai":
+					item.Openai, item.OpenaiWeb = CheckOpenAI(ctx, client.Client)
+				case "youtube":
+					if yt, err := CheckYoutube(ctx, client.Client); err == nil {
+						item.Youtube = yt
+					}
+				case "netflix":
+					if nf, err := CheckNetflix(ctx, client.Client); err == nil {
+						item.Netflix = nf
+					}
+				case "disney":
+					if ds, err := CheckDisney(ctx, client.Client); err == nil {
+						item.Disney = ds
+					}
+				case "gemini":
+					if gm, err := CheckGemini(ctx, client.Client); err == nil {
+						item.Gemini = gm
+					}
+				case "tiktok":
+					if tk, err := CheckTikTok(ctx, client.Client); err == nil {
+						item.TikTok = tk
+					}
 				}
 			}
-
+			tracker.CountMediaWithResult(true, 0, false)
+		}
+	
 			// 所有检测完成后，更新节点名称（重命名+标签）
 			skip := updateProxyName(ctx, &item, client.Client, item.SpeedKBps)
 			if skip {

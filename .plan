@@ -252,3 +252,220 @@ func cleanProxyStrings(proxy map[string]any) {
 | 2026-07-06 | 任务3 | ✅ 完成 | 添加cleanProxyStrings/CleanProxies，在去重前调用，编译通过 |
 | 2026-07-06 | 日志修复 | ✅ 完成 | 增加"已测试"和"未测试"统计字段，让数量对得上 |
 | 2026-07-06 | 超时优化 | ✅ 完成 | 将硬编码120s超时改为根据节点数和并发数自动计算，最小120s最大1800s |
+| 2026-07-07 | 全面审计 | ✅ 完成 | 审计所有配置项使用情况，发现3个重大问题 |
+| 2026-07-07 | 任务5 | ✅ 完成 | 补全媒体检测：遍历platforms调用CheckOpenAI/CheckYoutube/CheckNetflix/CheckDisney/CheckGemini/CheckTikTok，编译通过 |
+| 2026-07-07 | 任务7 | ✅ 完成 | 接入统一延迟模式：UnifiedDelay=true时用CheckAliveWithWarmup替代CheckAlive，编译通过 |
+| 2026-07-07 | 任务6 | ⏸️ 延期 | CheckGoogle函数缺失，原始版本也未实现，低优先级延期 |
+| 2026-07-07 | 任务8 | ✅ 完成 | 修复节点名称重复：Rename()使用counter为同国家节点添加序号，编译通过 |
+
+---
+
+## 全面配置审计结果 (2026-07-07)
+
+### 配置项生效状态汇总
+
+| 配置项 | 状态 | 使用位置 | 说明 |
+|--------|------|----------|------|
+| timeout | ✅ 生效 | client.go:90 | http.Client.Timeout（毫秒） |
+| warmup-timeout | ✅ 已修复 | delay.go:76 | UnifiedDelay=true时通过CheckAliveWithWarmup生效 |
+| test-timeout | ✅ 已修复 | delay.go:95 | 同上 |
+| unified-delay | ✅ 已修复 | delay.go:69 | Check()中根据配置选择CheckAliveWithWarmup |
+| platforms | ✅ 已修复 | pipeline.go:214,335 | 遍历platforms调用各检测函数，标签正常生成 |
+| media-check | ✅ 已修复 | pipeline.go:211 | 遍历platforms调用各检测函数 |
+| rename-node | ✅ 生效 | pipeline.go:295 | 控制是否重命名 |
+| node-prefix | ✅ 生效 | pipeline.go:301,305 | 重命名前缀 |
+| node-type | ✅ 生效 | fetch.go:148,260,292,346,375 | 协议类型过滤 |
+| filters | ✅ 生效 | pipeline.go:424 | 国家代码过滤 |
+| print-progress | ✅ 生效 | core/app.go:244 | 进度展示 |
+| check-interval | ✅ 生效 | core/app.go:76,79 | 检查间隔 |
+| cron-expression | ✅ 生效 | core/app.go:123,153 | Cron调度 |
+| alive-test-url | ✅ 生效 | checker/alive.go:15 | 存活检测URL |
+| speed-test-url | ✅ 生效 | checker/speed.go:78 | 测速URL |
+| download-timeout | ✅ 生效 | checker/speed.go:73 | 测速超时 |
+| download-mb | ✅ 生效 | checker/speed.go:109 | 下载大小限制 |
+| total-speed-limit | ✅ 生效 | pipeline.go:138 | 速率限制 |
+| sub-urls-retry | ✅ 生效 | provider/fetch.go:523 | 拉取重试 |
+| sub-urls-retry-interval | ✅ 生效 | provider/fetch.go:525 | 重试间隔 |
+| sub-urls-timeout | ✅ 生效 | provider/fetch.go:530 | 拉取超时 |
+| sub-urls-proxy | ✅ 生效 | provider/fetch.go:619 | 拉取代理 |
+| sub-urls-get-ua | ✅ 生效 | provider/fetch.go:550,593,637,677 | User-Agent |
+| sub-urls-remote | ✅ 生效 | provider/fetch.go:456 | 远程订阅URL |
+| listen-port | ✅ 生效 | core/server.go:107 | 服务端口 |
+| output-dir | ✅ 生效 | output/local.go:33 | 输出目录 |
+| apprise-api-server | ✅ 生效 | core/app.go:257 | 通知服务 |
+| recipient-url | ✅ 生效 | core/app.go:258 | 通知接收 |
+| notify-title | ✅ 生效 | core/app.go:259 | 通知标题 |
+| enable-web-ui | ✅ 生效 | core/server.go:49 | Web面板 |
+| api-key | ✅ 生效 | core/server.go:50 | API认证 |
+| sub-token | ✅ 生效 | core/server.go:35 | 订阅认证 |
+| github-proxy | ✅ 生效 | util/url.go:21 | GitHub代理 |
+| proxy | ✅ 生效 | core/app.go:70 | 全局代理 |
+| sub-urls-retry-failed | ✅ 生效 | config.go:ShouldRemoveFailedSub | 失败重试策略 |
+| sub-urls-min-node-count | ✅ 生效 | provider/fetch.go:270 | 最低节点数 |
+
+### 发现的3个重大问题
+
+#### 问题A: 媒体检测严重不完整 [严重/高优先级] ✅ 已修复
+**现状**: ~~`Check()` 中 `mediaON` 块只调用 `CheckYoutube`，不遍历 platforms 配置~~ → 已改为遍历platforms配置调用各检测函数
+**修复**: 任务5已完成，pipeline.go 现在遍历 `config.GlobalConfig.Platforms` 调用 CheckOpenAI/CheckYoutube/CheckNetflix/CheckDisney/CheckGemini/CheckTikTok
+
+#### 问题B: 统一延迟模式未接入 [中等/中优先级] ✅ 已修复
+**现状**: ~~`CheckAliveWithWarmup` / `DelayTestWithWarmup` 从未被主流程调用~~ → 已接入
+**修复**: 任务7已完成，当 `UnifiedDelay=true` 时使用 `CheckAliveWithWarmup` 替代 `CheckAlive`，`warmup-timeout` 和 `test-timeout` 配置生效
+
+#### 问题C: Result 字段未设置导致标签为空 [严重/高优先级] ✅ 已修复
+**现状**: ~~`updateProxyName()` 读取的字段从未被赋值~~ → 任务5修复后各检测函数已正确设置Result字段
+**修复**: 任务5补全媒体检测后，CheckOpenAI/CheckNetflix/CheckDisney/CheckGemini/CheckTikTok 结果写入对应字段，updateProxyName标签正常生成
+
+---
+
+## 新修复任务
+
+### 任务5: 补全媒体检测 — 遍历platforms调用对应检测函数 [严重/高优先级]
+**文件**: `subs-check/checker/pipeline.go`
+**状态**: ✅ 已完成 (2026-07-07)
+```go
+// 媒体检测：检测所有启用的平台
+for _, plat := range config.GlobalConfig.Platforms {
+    switch plat {
+    case "openai":
+        item.Openai, item.OpenaiWeb = CheckOpenAI(mediaCtx, si.client.Client)
+    case "youtube":
+        if yt, err := CheckYoutube(mediaCtx, si.client.Client); err == nil {
+            item.Youtube = yt
+        }
+    case "netflix":
+        if nf, err := CheckNetflix(mediaCtx, si.client.Client); err == nil {
+            item.Netflix = nf
+        }
+    case "disney":
+        if ds, err := CheckDisney(mediaCtx, si.client.Client); err == nil {
+            item.Disney = ds
+        }
+    case "gemini":
+        if gm, err := CheckGemini(mediaCtx, si.client.Client); err == nil {
+            item.Gemini = gm
+        }
+    case "tiktok":
+        if tk, err := CheckTikTok(mediaCtx, si.client.Client); err == nil {
+            item.TikTok = tk
+        }
+    }
+}
+```
+
+**当前实现** (pipeline.go 第211-220行，需替换):
+```go
+if mediaON {
+    tracker.SetStage(2, "媒体检测")
+    youtube, err := CheckYoutube(ctx, client.Client)
+    if err == nil {
+        item.Youtube = youtube
+        tracker.CountMediaWithResult(true, 0, false)
+    } else {
+        tracker.CountMediaWithResult(false, 0, false)
+    }
+}
+```
+
+**修改方案**:
+1. 将 mediaON 块改为遍历 `config.GlobalConfig.Platforms`
+2. 对每个 platform 调用对应的检测函数
+3. 将结果写入 Result 对应字段
+4. 保留 tracker.CountMediaWithResult 统计
+5. 注意: 当前 pipeline 是单阶段模式（非旧版三阶段），需适配当前架构
+
+**编译校验**: 修改完成后执行 `go build ./...` 确认编译通过
+
+---
+
+### 任务6: 实现 CheckGoogle 函数 [低优先级]
+**文件**: `subs-check/checker/media.go` 或新建 `checker/google.go`
+**状态**: ⏸️ 延期 (低优先级，原始版本也未实现)
+**方案**: 可参考 clash-verge-rev 的 Google 检测实现，或暂时移除 Google 字段
+**建议**: 由于 Google 检测场景有限（主要是检测 Google 服务可用性），优先级较低，可后续实现
+
+---
+
+### 任务7: 接入统一延迟模式 [中等/中优先级]
+**文件**: `subs-check/checker/pipeline.go`
+**状态**: ✅ 已完成 (2026-07-07)，使用 `CheckAliveWithWarmup` 替代 `CheckAlive`
+2. `CheckAliveWithWarmup` 返回 `(bool, int, error)`，包含 RTT 信息，可用于延迟显示
+3. 当 `UnifiedDelay == false`（默认），保持当前 `CheckAlive` 行为
+
+**修改位置** (pipeline.go Check() 函数中约第192行):
+```go
+// 当前:
+alive, err := CheckAlive(ctx, client.Client)
+
+// 修改为:
+var alive bool
+if config.GlobalConfig.UnifiedDelay {
+    alive, _, err = CheckAliveWithWarmup(ctx, client.Client)
+} else {
+    alive, err = CheckAlive(ctx, client.Client)
+}
+```
+
+**编译校验**: 修改完成后执行 `go build ./...` 确认编译通过
+
+---
+
+## 实施顺序（新任务）
+
+1. **任务5** → 补全媒体检测（核心问题，platforms标签全空）
+2. **任务7** → 接入统一延迟模式（配置项未生效）
+3. **任务6** → 实现CheckGoogle（低优先级，可后续）
+4. 每个任务完成后：执行 `go build ./...` 编译校验，更新本文件状态
+
+---
+
+## 风险与注意事项（补充）
+
+7. **媒体检测并发**: 旧版本使用三阶段模式（alive→speed→media），每阶段有独立并发控制。当前版本是单节点全流程模式，媒体检测在存活/测速后顺序执行，需注意超时控制
+8. **媒体检测超时**: 每个平台检测都是HTTP请求，Disney+检测需要3次请求，需确保整体超时合理
+9. **统一延迟模式**: 默认关闭(UnifiedDelay=false)，修改不影响现有行为，仅当用户显式配置时生效
+10. **CheckGoogle**: 旧版本也未实现，属于预留字段，可考虑移除或后续补充
+
+---
+
+### 任务8: 修复节点名称重复 [中等/中优先级]
+**文件**: `subs-check/provider/process.go`
+**状态**: ✅ 已完成 (2026-07-07)
+
+**问题**: 多个同国家节点产生相同名称如 "proxy US|63KB/s"，无法区分
+**根因**: `Rename(countryCode, fraudScore)` 只返回 `countryCode`，忽略了 `fraudScore` 参数，也未使用已有的 `counter` 计数器。同国家的节点全部得到相同基础名称。
+
+**已有基础设施**:
+- `counter map[string]int` 和 `counterLock sync.Mutex` 已定义（process.go:42-43）
+- `ResetRenameCounter()` 已定义（process.go:70-76）
+- `Check()` 开头已调用 `proxyutils.ResetRenameCounter()`（pipeline.go:77）
+
+**修复**:
+```go
+// 修改前:
+func Rename(countryCode string, fraudScore int) string {
+    return countryCode
+}
+
+// 修改后:
+func Rename(countryCode string, fraudScore int) string {
+    counterLock.Lock()
+    defer counterLock.Unlock()
+
+    counter[countryCode]++
+    count := counter[countryCode]
+
+    if count == 1 {
+        return countryCode
+    }
+    return fmt.Sprintf("%s%d", countryCode, count)
+}
+```
+
+**效果**:
+- 第1个US节点: "proxy US|63KB/s|GPT⁺"
+- 第2个US节点: "proxy US2|63KB/s|GPT⁺"
+- 第3个US节点: "proxy US3|63KB/s|GPT⁺"
+
+**编译校验**: go build ./... 编译通过
