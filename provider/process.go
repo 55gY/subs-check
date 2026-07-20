@@ -44,8 +44,29 @@ var (
 	counterLock = sync.Mutex{}
 )
 
+// superscriptDigits 上标数字映射表
+var superscriptDigits = []string{"⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"}
+
+// intToSuperscript 将整数转换为上标数字字符串
+func intToSuperscript(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	digits := []int{}
+	for n > 0 {
+		digits = append(digits, n%10)
+		n /= 10
+	}
+	// 反转并拼接
+	result := make([]byte, 0, len(digits)*3)
+	for i := len(digits) - 1; i >= 0; i-- {
+		result = append(result, superscriptDigits[digits[i]]...)
+	}
+	return string(result)
+}
+
 // Rename 根据国家代码生成节点名称
-// 格式: CountryCode 或 CountryCode+N (同国家第N个节点)
+// 格式: CountryCode 或 CountryCodeⁿ (同国家第n个节点，使用上标数字)
 func Rename(countryCode string, fraudScore int) string {
 	counterLock.Lock()
 	defer counterLock.Unlock()
@@ -56,7 +77,7 @@ func Rename(countryCode string, fraudScore int) string {
 	if count == 1 {
 		return countryCode
 	}
-	return fmt.Sprintf("%s%d", countryCode, count)
+	return countryCode + intToSuperscript(count)
 }
 
 // GetFraudScoreLabel 根据 fraudScore 返回纯净度中文描述

@@ -465,7 +465,7 @@ func Rename(countryCode string, fraudScore int) string {
 
 **效果**:
 - 第1个US节点: "proxy US|63KB/s|GPT⁺"
-- 第2个US节点: "proxy US2|63KB/s|GPT⁺"
-- 第3个US节点: "proxy US3|63KB/s|GPT⁺"
+- 第2个US节点: "proxy US²|63KB/s|GPT⁺"
+- 第3个US节点: "proxy US³|63KB/s|GPT⁺"
 
 **编译校验**: go build ./... 编译通过
