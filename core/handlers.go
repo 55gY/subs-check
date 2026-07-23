@@ -286,6 +286,13 @@ func (app *App) addConfig(c *gin.Context) {
 		return
 	}
 
+	// 校验 sub_url：拒绝包含换行/回车的输入，防止写入 config.yaml 时
+	// 注入额外的 YAML 行（YAML 注入）。
+	if strings.ContainsAny(req.SubUrl, "\r\n") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sub_url 包含非法字符"})
+		return
+	}
+
 	// 声明测试结果变量（如果启用了检测）
 	var testResult TestResult
 
@@ -538,9 +545,9 @@ func (app *App) getStatus(c *gin.Context) {
 		// 节点检测阶段:显示可用节点数
 		available = checker.Available.Load()
 		stage = "nodetest"
-		if checker.CurrentTracker != nil {
+		if tracker := checker.GetCurrentTracker(); tracker != nil {
 			// 只取当前阶段的失败数，避免跨阶段累计（如测活失败叠加到测速失败）。
-			_, _, currentStageDone, currentStageSuccess, _ := checker.CurrentTracker.GetStageInfo()
+			_, _, currentStageDone, currentStageSuccess, _ := tracker.GetStageInfo()
 			failed = currentStageDone - currentStageSuccess
 			if failed < 0 {
 				failed = 0
@@ -568,24 +575,26 @@ func (app *App) getStatus(c *gin.Context) {
 		"progressPercent": func() float64 {
 			return float64(checker.Progress.Load()) / 100
 		}(),
-		"failed":            failed,
-		"stage":             stage,
-		"statusText":        statusText,
-		"currentStageCode":  currentStageCode,
-		"currentStageName":  currentStageName,
-		"subsFetchActive":   proxyutils.SubsFetchActive.Load(),
-		"subsFetchTotal":    subsTotal,
-		"subsFetchSuccess":  proxyutils.SubsFetchSuccess.Load(),
-		"subsFetchFailed":   proxyutils.SubsFetchFailed.Load(),
-		"subsFetchProgress": subsProgress,
+		"failed":             failed,
+		"stage":              stage,
+		"statusText":         statusText,
+		"currentStageCode":   currentStageCode,
+		"currentStageName":   currentStageName,
+		"subsFetchActive":    proxyutils.SubsFetchActive.Load(),
+		"subsFetchTotal":     subsTotal,
+		"subsFetchSuccess":   proxyutils.SubsFetchSuccess.Load(),
+		"subsFetchFailed":    proxyutils.SubsFetchFailed.Load(),
+		"subsFetchProgress":  subsProgress,
+		"subsFetchNodeCount": proxyutils.SubsFetchNodeCount.Load(),
 	}
 
 	// 添加详细统计信息
-	if checker.CurrentTracker != nil {
-		totalNodes, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone := checker.CurrentTracker.GetStats()
-		currentStage, trackerStageName, currentStageDone, currentStageSuccess, currentStageTotal := checker.CurrentTracker.GetStageInfo()
-		timeoutRemaining := checker.CurrentTracker.GetTimeoutRemaining()
-		detailedStats := checker.CurrentTracker.GetDetailedStats()
+	if tracker := checker.GetCurrentTracker(); tracker != nil {
+		totalNodes, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone := tracker.GetStats()
+		currentStage, trackerStageName, currentStageDone, currentStageSuccess, currentStageTotal := tracker.GetStageInfo()
+		timeoutRemaining := tracker.GetTimeoutRemaining()
+		eta := tracker.GetETA()
+		detailedStats := tracker.GetDetailedStats()
 
 		if stage != "subscription" {
 			currentStageName = trackerStageName
@@ -621,6 +630,7 @@ func (app *App) getStatus(c *gin.Context) {
 			"currentStageSuccess": currentStageSuccess,
 			"currentStageTotal":   currentStageTotal,
 			"timeoutRemaining":    timeoutRemaining, // 超时倒计时（秒）
+			"eta":                 eta,              // 预计剩余时间（秒，基于存活进度估算）
 			"stageStats":          detailedStats,
 		}
 		response["currentStageCode"] = currentStageCode
@@ -812,6 +822,10 @@ func validSubToken(rawToken string) bool {
 }
 
 func ReadLastNLines(filePath string, n int) ([]string, error) {
+	// 防御 n<=0：make([]string, 负数) 会 panic，且 count%n 在 n==0 时会除零 panic
+	if n <= 0 {
+		return []string{}, nil
+	}
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -840,172 +854,6 @@ func ReadLastNLines(filePath string, n int) ([]string, error) {
 	start := count % n
 	result := append(ring[start:], ring[:start]...)
 	return result, nil
-}
-
-// isProxyDuplicate 判断节点是否重复（更健壮的判断方式）
-func isProxyDuplicate(newProxy map[string]any, existingProxies []map[string]any) bool {
-	for _, existing := range existingProxies {
-		// 1. 基础字段必须匹配
-		if existing["type"] != newProxy["type"] {
-			continue
-		}
-		if existing["server"] != newProxy["server"] {
-			continue
-		}
-		if existing["port"] != newProxy["port"] {
-			continue
-		}
-
-		proxyType, _ := newProxy["type"].(string)
-
-		// 2. 根据不同协议类型检查关键字段
-		switch proxyType {
-		case "vmess":
-			// VMess: server + port + uuid + alterId
-			if existing["uuid"] != newProxy["uuid"] {
-				continue
-			}
-			if existing["alterId"] != newProxy["alterId"] {
-				continue
-			}
-
-		case "vless":
-			// VLESS: server + port + uuid + flow
-			if existing["uuid"] != newProxy["uuid"] {
-				continue
-			}
-
-		case "ss", "shadowsocks":
-			// Shadowsocks: server + port + cipher + password
-			if existing["cipher"] != newProxy["cipher"] {
-				continue
-			}
-			if existing["password"] != newProxy["password"] {
-				continue
-			}
-
-		case "ssr":
-			// ShadowsocksR: server + port + cipher + password + protocol + obfs
-			if existing["cipher"] != newProxy["cipher"] {
-				continue
-			}
-			if existing["password"] != newProxy["password"] {
-				continue
-			}
-			if existing["protocol"] != newProxy["protocol"] {
-				continue
-			}
-			if existing["obfs"] != newProxy["obfs"] {
-				continue
-			}
-
-		case "trojan":
-			// Trojan: server + port + password + sni
-			if existing["password"] != newProxy["password"] {
-				continue
-			}
-			sni1, _ := existing["sni"].(string)
-			sni2, _ := newProxy["sni"].(string)
-			if sni1 != sni2 {
-				continue
-			}
-
-		case "hysteria", "hysteria2", "hy2":
-			// Hysteria: server + port + password/auth
-			pass1 := existing["password"]
-			pass2 := newProxy["password"]
-			auth1 := existing["auth"]
-			auth2 := newProxy["auth"]
-
-			// password 和 auth 可能是不同字段名
-			if pass1 != pass2 && auth1 != auth2 {
-				continue
-			}
-
-		case "tuic":
-			// TUIC: server + port + uuid + password
-			if existing["uuid"] != newProxy["uuid"] {
-				continue
-			}
-			if existing["password"] != newProxy["password"] {
-				continue
-			}
-
-		case "anytls":
-			// AnyTLS: server + port + password
-			if existing["password"] != newProxy["password"] {
-				continue
-			}
-
-		case "mieru":
-			// Mieru: server + port + username + password
-			if existing["username"] != newProxy["username"] {
-				continue
-			}
-			if existing["password"] != newProxy["password"] {
-				continue
-			}
-
-		case "sudoku":
-			// Sudoku: server + port + key
-			if existing["key"] != newProxy["key"] {
-				continue
-			}
-
-		case "wireguard", "wg":
-			// WireGuard: server + port + private-key + public-key
-			privateKey1 := existing["private-key"]
-			privateKey2 := newProxy["private-key"]
-			if privateKey1 != privateKey2 {
-				continue
-			}
-			publicKey1 := existing["public-key"]
-			publicKey2 := newProxy["public-key"]
-			if publicKey1 != publicKey2 {
-				continue
-			}
-
-		case "ssh":
-			// SSH: server + port + username + password/private-key
-			if existing["username"] != newProxy["username"] {
-				continue
-			}
-			// 检查 password 或 private-key
-			pass1 := existing["password"]
-			pass2 := newProxy["password"]
-			key1 := existing["private-key"]
-			key2 := newProxy["private-key"]
-			if pass1 != pass2 && key1 != key2 {
-				continue
-			}
-
-		case "snell":
-			// Snell: server + port + psk
-			if existing["psk"] != newProxy["psk"] {
-				continue
-			}
-
-		case "http", "socks", "socks5", "socks4":
-			// HTTP/SOCKS: server + port + username (如果有)
-			user1, hasUser1 := existing["username"].(string)
-			user2, hasUser2 := newProxy["username"].(string)
-			if hasUser1 && hasUser2 && user1 != user2 {
-				continue
-			}
-			// 如果都没有 username，仅依据 server+port 判断
-
-		default:
-			// 其他协议：比较 server + port + name
-			if existing["name"] != newProxy["name"] {
-				continue
-			}
-		}
-
-		// 所有关键字段都匹配，判定为重复
-		return true
-	}
-
-	return false
 }
 
 // TestResult 节点检测结果

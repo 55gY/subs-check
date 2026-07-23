@@ -21,6 +21,9 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// compactEveryNChecks 每完成多少轮检测后执行一次数据库 compact（回收磁盘空间）
+const compactEveryNChecks = 24
+
 // App 结构体用于管理应用程序状态
 type App struct {
 	configPath  string
@@ -34,6 +37,7 @@ type App struct {
 	done        chan struct{} // 用于结束ticker goroutine的信号
 	cron        *cron.Cron    // crontab调度器
 	version     string
+	checkCount  uint64 // 已完成检测轮数（仅 triggerCheck 内串行访问），用于周期性 compact
 }
 
 // New 创建新的应用实例
@@ -231,6 +235,18 @@ func (app *App) triggerCheck() {
 		}
 	}
 	debug.FreeOSMemory()
+
+	// 周期性 compact 数据库，回收已删除历史批次占用的磁盘空间
+	app.checkCount++
+	if app.checkCount%compactEveryNChecks == 0 {
+		if db, err := output.GetDB(); err == nil {
+			if err := db.CompactDB(); err != nil {
+				slog.Warn("数据库 compact 失败", "error", err)
+			}
+		} else {
+			slog.Warn("打开数据库失败，跳过 compact", "error", err)
+		}
+	}
 }
 
 func (app *App) MarkStopping() {

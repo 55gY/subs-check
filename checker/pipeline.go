@@ -49,9 +49,17 @@ var Available atomic.Uint32
 var ProxyCount atomic.Uint32
 var TotalBytes atomic.Uint64
 var ForceClose atomic.Bool
-var CurrentTracker *ProgressTracker
+// currentTracker 保存当前检测流水线的进度追踪器，供 API 层并发读取。
+// 使用 atomic.Pointer 避免检测 goroutine 写入与 /api/status 读取之间的数据竞争。
+var currentTracker atomic.Pointer[ProgressTracker]
 var Bucket *ratelimit.Bucket
 var progressWeight ProgressWeight
+
+// GetCurrentTracker 原子读取当前进度追踪器；无检测进行时返回 nil。
+// 供 API 层（/api/status）在检测 goroutine 并发写入时安全读取。
+func GetCurrentTracker() *ProgressTracker {
+	return currentTracker.Load()
+}
 
 // calcCheckTimeout 根据节点数量和并发数自动计算检测超时时间
 // 公式: 批次数 × 每批平均耗时(2秒)，最小120秒，最大1800秒(30分钟)
@@ -76,7 +84,7 @@ func calcCheckTimeout(nodeCount, concurrent int) time.Duration {
 func Check() ([]Result, error) {
 	proxyutils.ResetRenameCounter()
 	ForceClose.Store(false)
-	CurrentTracker = nil
+	currentTracker.Store(nil)
 
 	ProxyCount.Store(0)
 	Available.Store(0)
@@ -123,7 +131,7 @@ func Check() ([]Result, error) {
 	mediaON := config.GlobalConfig.MediaCheck
 	progressWeight = getCheckWeight(speedON, mediaON)
 	tracker := NewProgressTracker(len(proxies))
-	CurrentTracker = tracker
+	currentTracker.Store(tracker)
 
 	slog.Info("检测模式配置",
 		"存活检测", true,
@@ -208,6 +216,7 @@ func Check() ([]Result, error) {
 				if err == nil {
 					item.SpeedKBps = metrics.SpeedKBps
 					tracker.CountSpeed(true)
+					tracker.AddSpeedSample(metrics.SpeedKBps)
 				} else {
 					tracker.CountSpeed(false)
 				}
@@ -243,6 +252,7 @@ func Check() ([]Result, error) {
 				}
 			}
 			tracker.CountMediaWithResult(true, 0, false)
+			tracker.AddMediaResult(item.Openai || item.OpenaiWeb, item.Netflix, item.Disney, item.Gemini, item.Youtube, item.TikTok)
 		}
 	
 			// 所有检测完成后，更新节点名称（重命名+标签）

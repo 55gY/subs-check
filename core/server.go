@@ -175,7 +175,12 @@ func constantTimeEqual(provided, expected string) bool {
 }
 
 func GenerateSimpleKey() string {
-	return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// 极少数环境下 crypto/rand 不可用时，退回到同样使用 crypto/rand 的强 token 生成
+		return GenerateSecureToken()
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func GenerateSecureToken() string {

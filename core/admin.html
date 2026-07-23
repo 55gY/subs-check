@@ -435,6 +435,7 @@
                                     <span class="stage-step-meta-item">总数: <span data-stage-total id="subsFetchTotal">0</span></span>
                                     <span class="stage-step-meta-item">成功: <span data-stage-success id="subsFetchSuccess">0</span></span>
                                     <span class="stage-step-meta-item">失败: <span data-stage-failed id="subsFetchFailed">0</span></span>
+                                    <span class="stage-step-meta-item">节点: <span id="subsFetchNodeCount">0</span></span>
                                 </span>
                             </div>
                             <div class="stage-step pending" data-stage-code="alive">
@@ -443,6 +444,7 @@
                                     <span class="stage-step-meta-item">总数: <span data-stage-total id="aliveTotal">0</span></span>
                                     <span class="stage-step-meta-item">成功: <span data-stage-success id="aliveSuccess">0</span></span>
                                     <span class="stage-step-meta-item">失败: <span data-stage-failed id="aliveFailed">0</span></span>
+                                    <span class="stage-step-meta-item">存活率: <span id="aliveRate">-</span></span>
                                 </span>
                             </div>
                             <div class="stage-step pending" data-stage-code="speed">
@@ -451,24 +453,21 @@
                                     <span class="stage-step-meta-item">总数: <span data-stage-total id="speedTotal">0</span></span>
                                     <span class="stage-step-meta-item">成功: <span data-stage-success id="speedSuccess">0</span></span>
                                     <span class="stage-step-meta-item">失败: <span data-stage-failed id="speedFailed">0</span></span>
+                                    <span class="stage-step-meta-item">均速: <span id="speedAvg">-</span></span>
                                 </span>
                             </div>
                             <div class="stage-step pending" data-stage-code="media">
                                 <span class="stage-step-label">媒体</span>
                                 <span class="stage-step-meta" data-stage-meta="media">
                                     <span class="stage-step-meta-item">总数: <span data-stage-total id="mediaTotal">0</span></span>
-                                    <span class="stage-step-meta-item">成功: <span data-stage-success id="mediaSuccess">0</span></span>
-                                    <span class="stage-step-meta-item">失败: <span data-stage-failed id="mediaFailed">0</span></span>
+                                    <span class="stage-step-meta-item">GPT:<span id="mediaOpenai">0</span> NF:<span id="mediaNetflix">0</span> D+:<span id="mediaDisney">0</span></span>
+                                    <span class="stage-step-meta-item">YT:<span id="mediaYoutube">0</span> GM:<span id="mediaGemini">0</span> TK:<span id="mediaTikTok">0</span></span>
                                 </span>
                             </div>
                         </div>
-                        <!-- 详细统计信息 -->
-                        <div id="detailStats" class="progress-info" style="font-size: 12px; margin: 5px 0; color: #6c757d;">
-                            <span id="detailStatsText"></span>
-                        </div>
                         <div class="progress-info">
                             <div>任务进度: <span id="progressText">N/A</span> | 成功: <span id="successCount">N/A</span> | 失败: <span id="failedCount">N/A</span></div>
-                            <div><span id="progressPercent">N/A</span></div>
+                            <div><span id="etaText" style="margin-right: 8px; color: #0d6efd;"></span><span id="progressPercent">N/A</span></div>
                         </div>
                         
                         <div class="progress">
@@ -896,8 +895,25 @@
             });
         }
         
+        // 将 KB/s 速度格式化为可读字符串
+        function formatSpeed(kbps) {
+            if (kbps >= 1024) {
+                return (kbps / 1024).toFixed(1) + 'MB/s';
+            }
+            return kbps + 'KB/s';
+        }
+
+        // HTML 转义，防止日志/接口内容中的标签被作为 HTML 注入（XSS）
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = String(text ?? '');
+            return div.innerHTML;
+        }
+
         // 为日志添加颜色
         function colorizeLog(log) {
+            // 先转义，避免日志内容（含节点名、订阅 URL 等外部可控数据）被当作 HTML 执行
+            log = escapeHtml(log);
             // 匹配时间部分
             log = log.replace(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/, '<span class="log-time">$1</span>');
             
@@ -976,66 +992,14 @@
             progressBarSuccess.style.width = `${percentSuccess}%`;
             progressBarSuccess.setAttribute('aria-valuenow', percentSuccess);
             
-            // 显示详细统计信息
-            const detailStatsText = document.getElementById('detailStatsText');
-            if (detailStats) {
-                let text = `当前阶段=${stageName} | 总进度=${overallPercent}%`;
-                
-                if (detailStats.aliveSuccess !== undefined && detailStats.aliveDone > 0) {
-                    text += ` | 存活=${detailStats.aliveSuccess}`;
-                }
-                if (detailStats.speedSuccess !== undefined && detailStats.speedDone > 0) {
-                    text += ` | 测速通过=${detailStats.speedSuccess}`;
-                }
-                if (detailStats.mediaDone !== undefined && detailStats.mediaDone > 0) {
-                    text += ` | 媒体检测=${detailStats.mediaDone}`;
-                }
-
-                if (detailStats.currentStageDone !== undefined) {
-                    if (detailStats.currentStageSuccess !== undefined && detailStats.currentStageSuccess > 0) {
-                        if (stageTotal > 0) {
-                            text += ` | 阶段进度=${detailStats.currentStageDone}/${stageTotal}`;
-                        } else {
-                            text += ` | 阶段进度=${detailStats.currentStageDone}`;
-                        }
-                        text += ` | 阶段成功=${detailStats.currentStageSuccess}`;
-                    } else {
-                        if (stageTotal > 0) {
-                            text += ` | 阶段进度=${detailStats.currentStageDone}/${stageTotal}`;
-                        } else {
-                            text += ` | 阶段进度=${detailStats.currentStageDone}`;
-                        }
-                    }
-                }
-
-                const currentStageStats = detailStats.stageStats?.[
-                    detailStats.currentStage === 0 ? 'alive' : detailStats.currentStage === 1 ? 'speed' : 'media'
-                ];
-                if (currentStageStats) {
-                    if (currentStageStats.successRate !== undefined && currentStageStats.done > 0) {
-                        text += ` | 阶段成功率=${currentStageStats.successRate}%`;
-                    }
-                    if (currentStageStats.timeoutRate !== undefined && currentStageStats.done > 0) {
-                        text += ` | 阶段超时率=${currentStageStats.timeoutRate}%`;
-                    }
-                }
-                
-                // 显示超时倒计时
-                if (detailStats.timeoutRemaining !== undefined && detailStats.timeoutRemaining > 0) {
-                    const minutes = Math.floor(detailStats.timeoutRemaining / 60);
-                    const seconds = detailStats.timeoutRemaining % 60;
-                    if (minutes > 0) {
-                        text += ` | ⏱️ 超时倒计时: ${minutes}分${seconds}秒`;
-                    } else {
-                        text += ` | ⏱️ 超时倒计时: ${seconds}秒`;
-                    }
-                }
-                
-                text += ` | 可用数=${available}`;
-                
-                detailStatsText.textContent = text;
+            // 显示预计剩余时间（ETA）
+            const etaText = document.getElementById('etaText');
+            if (detailStats && detailStats.eta > 0) {
+                const etaM = Math.floor(detailStats.eta / 60);
+                const etaS = detailStats.eta % 60;
+                etaText.textContent = etaM > 0 ? `⏳ 预计剩余 ${etaM}分${etaS}秒 | ` : `⏳ 预计剩余 ${etaS}秒 | `;
             } else {
-                detailStatsText.textContent = '';
+                etaText.textContent = '';
             }
         }
 
@@ -1062,6 +1026,7 @@
             const subscriptionProgress = Number(window.__statusData?.subsFetchProgress ?? detailStats?.subsFetchProgress ?? 0);
             const subscriptionSuccess = Number(window.__statusData?.subsFetchSuccess ?? detailStats?.subsFetchSuccess ?? 0);
             const subscriptionFailed = Number(window.__statusData?.subsFetchFailed ?? detailStats?.subsFetchFailed ?? 0);
+            const subscriptionNodeCount = Number(window.__statusData?.subsFetchNodeCount ?? detailStats?.subsFetchNodeCount ?? 0);
             const subscriptionActive = Boolean(detailStats?.subsFetchActive) || (checking && currentStageCode === 'subscription');
             const subscriptionDone = !subscriptionActive && subscriptionTotal > 0 && subscriptionProgress >= subscriptionTotal;
             const aliveDone = Number(detailStats?.aliveDone || 0);
@@ -1082,15 +1047,24 @@
             setValue(['#subsFetchTotal', '[data-stage-total]#subsFetchTotal'], subscriptionTotal);
             setValue(['#subsFetchSuccess', '[data-stage-success]#subsFetchSuccess'], subscriptionSuccess);
             setValue(['#subsFetchFailed', '[data-stage-failed]#subsFetchFailed'], subscriptionFailed);
+            setValue(['#subsFetchNodeCount'], subscriptionNodeCount);
             setValue(['#aliveTotal', '[data-stage-total]#aliveTotal'], aliveDone);
             setValue(['#aliveSuccess', '[data-stage-success]#aliveSuccess'], aliveSuccess);
             setValue(['#aliveFailed', '[data-stage-failed]#aliveFailed'], Math.max(aliveDone - aliveSuccess, 0));
+            setValue(['#aliveRate'], aliveDone > 0 ? Math.round(aliveSuccess / aliveDone * 100) + '%' : '-');
             setValue(['#speedTotal', '[data-stage-total]#speedTotal'], speedDone);
             setValue(['#speedSuccess', '[data-stage-success]#speedSuccess'], speedSuccess);
             setValue(['#speedFailed', '[data-stage-failed]#speedFailed'], Math.max(speedDone - speedSuccess, 0));
+            const avgSpeedKBps = Number(detailStats?.stageStats?.avgSpeedKBps || 0);
+            setValue(['#speedAvg'], avgSpeedKBps > 0 ? formatSpeed(avgSpeedKBps) : '-');
             setValue(['#mediaTotal', '[data-stage-total]#mediaTotal'], mediaDone);
-            setValue(['#mediaSuccess', '[data-stage-success]#mediaSuccess'], mediaDone);
-            setValue(['#mediaFailed', '[data-stage-failed]#mediaFailed'], 0);
+            const mediaPlatform = detailStats?.stageStats?.mediaPlatform || {};
+            setValue(['#mediaOpenai'], mediaPlatform.openai || 0);
+            setValue(['#mediaNetflix'], mediaPlatform.netflix || 0);
+            setValue(['#mediaDisney'], mediaPlatform.disney || 0);
+            setValue(['#mediaYoutube'], mediaPlatform.youtube || 0);
+            setValue(['#mediaGemini'], mediaPlatform.gemini || 0);
+            setValue(['#mediaTikTok'], mediaPlatform.tiktok || 0);
 
             const stageState = {
                 subscription: { active: subscriptionActive, done: subscriptionDone },
@@ -1214,7 +1188,7 @@
                         document.getElementById('successCount').textContent = 'N/A';
                         document.getElementById('failedCount').textContent = 'N/A';
                         document.getElementById('progressPercent').textContent = 'N/A';
-                        document.getElementById('detailStatsText').textContent = '';
+                        document.getElementById('etaText').textContent = '';
                         document.getElementById('progressBarTotal').style.width = '0%';
                         document.getElementById('progressBarSuccess').style.width = '0%';
                     }
@@ -1239,7 +1213,7 @@
                 document.getElementById('successCount').textContent = 'N/A';
                 document.getElementById('failedCount').textContent = 'N/A';
                 document.getElementById('progressPercent').textContent = 'N/A';
-                document.getElementById('detailStatsText').textContent = '';
+                document.getElementById('etaText').textContent = '';
                 document.getElementById('progressBarTotal').style.width = '0%';
                 document.getElementById('progressBarSuccess').style.width = '0%';
                 updateStageSteps('', null, '', false, false);
@@ -1284,12 +1258,12 @@
                     const isBanned = record.bannedUntil && new Date(record.bannedUntil) > new Date();
                     
                     tr.innerHTML = `
-                        <td><code>${record.key}</code></td>
-                        <td>${record.failCount}</td>
-                        <td>${record.lastFailAt ? new Date(record.lastFailAt).toLocaleString() : '-'}</td>
-                        <td>${isBanned ? '<span class="text-danger">' + new Date(record.bannedUntil).toLocaleString() + '</span>' : '<span class="text-muted">未封禁</span>'}</td>
-                        <td><span class="badge ${record.lastScope === 'api' ? 'bg-info' : 'bg-secondary'}">${record.lastScope || '-'}</span></td>
-                        <td><button class="btn btn-outline-danger btn-sm" onclick="removeBlacklist('${record.key}')"><i class="bi bi-trash"></i> 移除</button></td>
+                        <td><code>${escapeHtml(record.key)}</code></td>
+                        <td>${escapeHtml(record.failCount)}</td>
+                        <td>${record.lastFailAt ? escapeHtml(new Date(record.lastFailAt).toLocaleString()) : '-'}</td>
+                        <td>${isBanned ? '<span class="text-danger">' + escapeHtml(new Date(record.bannedUntil).toLocaleString()) + '</span>' : '<span class="text-muted">未封禁</span>'}</td>
+                        <td><span class="badge ${record.lastScope === 'api' ? 'bg-info' : 'bg-secondary'}">${escapeHtml(record.lastScope || '-')}</span></td>
+                        <td><button class="btn btn-outline-danger btn-sm" onclick="removeBlacklist('${escapeHtml(record.key)}')"><i class="bi bi-trash"></i> 移除</button></td>
                     `;
                     tbody.appendChild(tr);
                 });

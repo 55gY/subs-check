@@ -32,8 +32,9 @@ import (
 var SubsFetchProgress atomic.Int32 // 已完成数
 var SubsFetchTotal atomic.Int32    // 总数
 var SubsFetchSuccess atomic.Int32  // 成功数
-var SubsFetchFailed atomic.Int32   // 失败数
-var SubsFetchActive atomic.Bool    // 订阅获取是否仍在进行中
+var SubsFetchFailed atomic.Int32    // 失败数
+var SubsFetchNodeCount atomic.Int32 // 已解析节点数（订阅获取阶段实时累积）
+var SubsFetchActive atomic.Bool     // 订阅获取是否仍在进行中
 
 // 缓存的备用网络接口
 var alternativeInterfaces []net.IP
@@ -143,6 +144,7 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 	SubsFetchProgress.Store(0)
 	SubsFetchSuccess.Store(0)
 	SubsFetchFailed.Store(0)
+	SubsFetchNodeCount.Store(0)
 	SubsFetchActive.Store(true)
 
 	if len(config.GlobalConfig.NodeType) > 0 {
@@ -150,7 +152,7 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 	}
 
 	var wg sync.WaitGroup
-	proxyChan := make(chan map[string]any, 1)          // 缓冲通道存储解析的代理
+	proxyChan := make(chan map[string]any, 1024)          // 缓冲通道存储解析的代理
 	concurrentLimit := make(chan struct{}, 1000)       // 订阅拉取固定使用1000并发，不受concurrent限制
 	failedSubsChan := make(chan string, len(subUrls))  // 收集失败的订阅链接
 	successSubsChan := make(chan string, len(subUrls)) // 收集成功的订阅链接
@@ -209,6 +211,7 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 	go func() {
 		for proxy := range proxyChan {
 			mihomoProxies = append(mihomoProxies, proxy)
+			SubsFetchNodeCount.Add(1)
 		}
 		done <- struct{}{}
 	}()
@@ -518,6 +521,11 @@ func fetchRemoteSubUrls(listURL string) ([]string, error) {
 	return res, nil
 }
 
+// maxSubBodySize 限制单个订阅响应体的最大读取大小，防止恶意/故障服务器
+// 返回超大内容导致内存耗尽（OOM）。64MiB 对任何正常订阅（即便是包含
+// 数万节点的聚合配置）都绰绰有余。
+const maxSubBodySize = 64 << 20 // 64 MiB
+
 // 订阅链接中获取数据
 func GetDateFromSubs(subUrl string) ([]byte, error) {
 	maxRetries := config.GlobalConfig.SubUrlsReTry
@@ -558,13 +566,14 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 			directErr = err
 			continue
 		}
-		defer resp.Body.Close()
 		if resp.StatusCode != 200 {
 			directErr = fmt.Errorf("订阅链接: %s 返回状态码: %d", subUrl, resp.StatusCode)
+			resp.Body.Close()
 			continue
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubBodySize))
+		resp.Body.Close()
 		if err != nil {
 			directErr = fmt.Errorf("读取订阅链接: %s 数据错误: %v", subUrl, err)
 			continue
@@ -600,12 +609,13 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 			if err != nil {
 				continue
 			}
-			defer resp.Body.Close()
 			if resp.StatusCode != 200 {
+				resp.Body.Close()
 				continue
 			}
 
-			body, err := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubBodySize))
+			resp.Body.Close()
 			if err != nil {
 				continue
 			}
@@ -644,13 +654,13 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 		if err != nil {
 			continue
 		}
-		defer resp.Body.Close()
-
 		if resp.StatusCode != 200 {
+			resp.Body.Close()
 			continue
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubBodySize))
+		resp.Body.Close()
 		if err != nil {
 			continue
 		}
@@ -684,13 +694,13 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 			if err != nil {
 				continue
 			}
-			defer resp.Body.Close()
-
 			if resp.StatusCode != 200 {
+				resp.Body.Close()
 				continue
 			}
 
-			body, err := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubBodySize))
+			resp.Body.Close()
 			if err != nil {
 				continue
 			}

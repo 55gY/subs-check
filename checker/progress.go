@@ -17,10 +17,22 @@ type StageStats struct {
 	TimeoutRate   int64 `json:"timeoutRate"`
 }
 
+// MediaPlatformStats 媒体检测各平台解锁成功数（用于前端细分展示）
+type MediaPlatformStats struct {
+	Openai  int32 `json:"openai"`
+	Netflix int32 `json:"netflix"`
+	Disney  int32 `json:"disney"`
+	Youtube int32 `json:"youtube"`
+	Gemini  int32 `json:"gemini"`
+	TikTok  int32 `json:"tiktok"`
+}
+
 type ProgressStats struct {
-	Alive StageStats `json:"alive"`
-	Speed StageStats `json:"speed"`
-	Media StageStats `json:"media"`
+	Alive         StageStats         `json:"alive"`
+	Speed         StageStats         `json:"speed"`
+	Media         StageStats         `json:"media"`
+	MediaPlatform MediaPlatformStats `json:"mediaPlatform"`
+	AvgSpeedKBps  int                `json:"avgSpeedKBps"`
 }
 
 func finalizeStageStats(stats *StageStats) {
@@ -88,6 +100,17 @@ type ProgressTracker struct {
 	speedTimeouts      atomic.Int32
 	mediaTotalDuration atomic.Int64
 	mediaTimeouts      atomic.Int32
+
+	// 测速累计速度（用于计算平均速度，单位 KB/s）
+	speedTotalKBps atomic.Int64
+
+	// 媒体各平台解锁成功计数
+	mediaOpenai  atomic.Int32
+	mediaNetflix atomic.Int32
+	mediaDisney  atomic.Int32
+	mediaYoutube atomic.Int32
+	mediaGemini  atomic.Int32
+	mediaTikTok  atomic.Int32
 }
 
 // NewProgressTracker 初始化进度追踪器并重置外部原子变量。
@@ -187,6 +210,58 @@ func (pt *ProgressTracker) CountMediaWithResult(success bool, duration time.Dura
 	pt.refresh()
 }
 
+// AddSpeedSample 累计一次成功测速的速度值（KB/s），用于计算平均速度
+func (pt *ProgressTracker) AddSpeedSample(kbps int) {
+	if kbps > 0 {
+		pt.speedTotalKBps.Add(int64(kbps))
+	}
+}
+
+// AddMediaResult 记录一个节点各媒体平台的解锁结果，用于平台细分统计
+func (pt *ProgressTracker) AddMediaResult(openai, netflix, disney, gemini bool, youtube, tiktok string) {
+	if openai {
+		pt.mediaOpenai.Add(1)
+	}
+	if netflix {
+		pt.mediaNetflix.Add(1)
+	}
+	if disney {
+		pt.mediaDisney.Add(1)
+	}
+	if gemini {
+		pt.mediaGemini.Add(1)
+	}
+	if youtube != "" {
+		pt.mediaYoutube.Add(1)
+	}
+	if tiktok != "" {
+		pt.mediaTikTok.Add(1)
+	}
+}
+
+// GetETA 基于存活检测进度与已用时间估算整体剩余秒数（0 表示未知或已完成）
+func (pt *ProgressTracker) GetETA() int {
+	start, ok := pt.timeoutStartTime.Load().(time.Time)
+	if !ok || start.IsZero() {
+		return 0
+	}
+	done := pt.aliveDone.Load()
+	total := pt.totalJobs.Load()
+	if done <= 0 || total <= 0 || done >= total {
+		return 0
+	}
+	elapsed := time.Since(start).Seconds()
+	if elapsed <= 0 {
+		return 0
+	}
+	rate := float64(done) / float64(total)
+	remaining := elapsed * (1 - rate) / rate
+	if remaining < 0 {
+		return 0
+	}
+	return int(remaining)
+}
+
 // GetStats 获取当前统计信息（供API使用）
 func (pt *ProgressTracker) GetStats() (totalNodes, aliveSuccess, aliveDone, speedSuccess, speedDone, mediaDone int32) {
 	return pt.totalJobs.Load(),
@@ -231,6 +306,18 @@ func (pt *ProgressTracker) GetDetailedStats() ProgressStats {
 	finalizeStageStats(&stats.Alive)
 	finalizeStageStats(&stats.Speed)
 	finalizeStageStats(&stats.Media)
+
+	stats.MediaPlatform = MediaPlatformStats{
+		Openai:  pt.mediaOpenai.Load(),
+		Netflix: pt.mediaNetflix.Load(),
+		Disney:  pt.mediaDisney.Load(),
+		Youtube: pt.mediaYoutube.Load(),
+		Gemini:  pt.mediaGemini.Load(),
+		TikTok:  pt.mediaTikTok.Load(),
+	}
+	if speedSuccess > 0 {
+		stats.AvgSpeedKBps = int(pt.speedTotalKBps.Load() / int64(speedSuccess))
+	}
 
 	return stats
 }

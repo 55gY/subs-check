@@ -194,28 +194,60 @@ func (db *DB) ReplaceCurrentBatch(records []DBNodeRecord) error {
 			return fmt.Errorf("bucket %s 不存在", nodesBucketName)
 		}
 
+		// 先收集 key，避免在 cursor 遍历中删除/修改导致跳过记录（bbolt 陷阱）：
+		//   - 旧的 BatchPrevious 记录：直接删除，释放历史数据，防止数据库无限增长
+		//   - 旧的 BatchCurrent 记录：降级为 BatchPrevious，作为本轮的回退数据
+		// 这样库中始终只保留最近两批（current + previous），与 QueryRecords 的回退语义一致。
+		var toDelete [][]byte
+		var toDemote [][]byte
 		cursor := bucket.Cursor()
 		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
 			var record DBNodeRecord
 			if err := json.Unmarshal(value, &record); err != nil {
 				return fmt.Errorf("解析现有记录失败: %w", err)
 			}
-			if record.Batch == BatchCurrent {
-				record.Batch = BatchPrevious
-				record.UpdatedAt = time.Now()
-				data, err := json.Marshal(record)
-				if err != nil {
-					return fmt.Errorf("序列化上一批记录失败: %w", err)
-				}
-				if err := bucket.Put(key, data); err != nil {
-					return fmt.Errorf("写入上一批记录失败: %w", err)
-				}
+			switch record.Batch {
+			case BatchPrevious:
+				toDelete = append(toDelete, append([]byte(nil), key...))
+			case BatchCurrent:
+				toDemote = append(toDemote, append([]byte(nil), key...))
 			}
 		}
 
+		now := time.Now()
+
+		// 1) 删除更早的历史批次，只保留最近两批（首次运行即可清理历史膨胀）
+		for _, key := range toDelete {
+			if err := bucket.Delete(key); err != nil {
+				return fmt.Errorf("删除旧批次记录失败: %w", err)
+			}
+		}
+
+		// 2) 将上一轮的 current 降级为 previous
+		for _, key := range toDemote {
+			value := bucket.Get(key)
+			if value == nil {
+				continue
+			}
+			var record DBNodeRecord
+			if err := json.Unmarshal(value, &record); err != nil {
+				return fmt.Errorf("解析当前批记录失败: %w", err)
+			}
+			record.Batch = BatchPrevious
+			record.UpdatedAt = now
+			data, err := json.Marshal(record)
+			if err != nil {
+				return fmt.Errorf("序列化上一批记录失败: %w", err)
+			}
+			if err := bucket.Put(key, data); err != nil {
+				return fmt.Errorf("写入上一批记录失败: %w", err)
+			}
+		}
+
+		// 3) 写入本轮的新 current 批次
 		for _, record := range records {
 			record.Batch = BatchCurrent
-			record.UpdatedAt = time.Now()
+			record.UpdatedAt = now
 
 			nextID, err := bucket.NextSequence()
 			if err != nil {
@@ -349,6 +381,10 @@ func (db *DB) CleanupAuthFailures(now time.Time) error {
 			return fmt.Errorf("bucket %s 不存在", authBucketName)
 		}
 
+		// 先收集需要删除的 key，遍历结束后再统一删除：
+		// 避免在 bbolt cursor 遍历过程中 Delete 导致跳过相邻记录
+		// （与 MigrateAuthRecords 的延迟删除模式保持一致）。
+		var toDelete [][]byte
 		cursor := bucket.Cursor()
 		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
 			var record AuthFailureRecord
@@ -356,9 +392,12 @@ func (db *DB) CleanupAuthFailures(now time.Time) error {
 				return fmt.Errorf("解析鉴权失败记录失败: %w", err)
 			}
 			if !record.BannedUntil.IsZero() && !record.BannedUntil.After(now) {
-				if err := bucket.Delete(key); err != nil {
-					return err
-				}
+				toDelete = append(toDelete, append([]byte(nil), key...))
+			}
+		}
+		for _, key := range toDelete {
+			if err := bucket.Delete(key); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -520,6 +559,70 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// CompactDB 对整个数据库执行 compact，回收已删除记录（如历史批次）占用的磁盘空间。
+// bbolt 删除记录后文件不会自动收缩，需通过 compact 重写有效页来回收空间。
+// 该操作会短暂关闭并重新打开底层连接，调用期间应避免并发写；任何失败路径都会
+// 尽力重新打开连接，避免连接长期为 nil。
+func (db *DB) CompactDB() error {
+	if db == nil || db.conn == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+
+	saver, err := NewLocalSaver()
+	if err != nil {
+		return fmt.Errorf("创建本地保存器失败: %w", err)
+	}
+	dbPath := filepath.Join(saver.OutputPath, dbFileName)
+	tmpPath := dbPath + ".compact"
+
+	beforeInfo, statErr := os.Stat(dbPath)
+	if statErr != nil {
+		return fmt.Errorf("读取数据库文件信息失败: %w", statErr)
+	}
+
+	// 关闭当前连接（compact 需要独占访问）
+	if closeErr := db.conn.Close(); closeErr != nil {
+		slog.Warn("关闭数据库连接失败", "error", closeErr)
+	}
+	db.conn = nil
+
+	// compact 到临时文件
+	if compactErr := compactDBFile(dbPath, tmpPath); compactErr != nil {
+		_ = os.Remove(tmpPath)
+		conn, openErr := bbolt.Open(dbPath, fileMode, nil)
+		if openErr != nil {
+			return fmt.Errorf("compact 失败且无法重新打开数据库: %w", openErr)
+		}
+		db.conn = conn
+		return fmt.Errorf("compact 失败: %w", compactErr)
+	}
+
+	// 用 compact 后的文件替换原文件
+	if renameErr := os.Rename(tmpPath, dbPath); renameErr != nil {
+		_ = os.Remove(tmpPath)
+		conn, openErr := bbolt.Open(dbPath, fileMode, nil)
+		if openErr != nil {
+			return fmt.Errorf("替换数据库文件失败且无法重新打开: %w", openErr)
+		}
+		db.conn = conn
+		return fmt.Errorf("替换数据库文件失败: %w", renameErr)
+	}
+
+	// 重新打开 compact 后的文件
+	conn, openErr := bbolt.Open(dbPath, fileMode, nil)
+	if openErr != nil {
+		return fmt.Errorf("重新打开 compact 后数据库失败: %w", openErr)
+	}
+	db.conn = conn
+
+	if afterInfo, err := os.Stat(dbPath); err == nil {
+		slog.Info("数据库 compact 完成",
+			"compact前", fmt.Sprintf("%.2fMB", float64(beforeInfo.Size())/1024/1024),
+			"compact后", fmt.Sprintf("%.2fMB", float64(afterInfo.Size())/1024/1024))
+	}
+	return nil
 }
 
 // compactDBFile 通过打开源数据库并复制有效数据到新数据库来 compact
@@ -713,7 +816,9 @@ func proxyExists(newProxy map[string]any, existingProxies []map[string]any) bool
 				continue
 			}
 		case "hysteria", "hysteria2", "hy2":
-			if existing["password"] != newProxy["password"] && existing["auth"] != newProxy["auth"] {
+			// password 与 auth 是同一凭证的别名字段，任一不同即视为不同节点，
+			// 避免同服务器不同密码的节点被误判为重复而丢弃（与其余协议分支保持一致）。
+			if existing["password"] != newProxy["password"] || existing["auth"] != newProxy["auth"] {
 				continue
 			}
 		case "tuic":
@@ -721,7 +826,8 @@ func proxyExists(newProxy map[string]any, existingProxies []map[string]any) bool
 				continue
 			}
 		case "anytls", "snell":
-			if existing["password"] != newProxy["password"] && existing["psk"] != newProxy["psk"] {
+			// password 与 psk 为别名字段，任一不同即视为不同节点。
+			if existing["password"] != newProxy["password"] || existing["psk"] != newProxy["psk"] {
 				continue
 			}
 		case "mieru":
@@ -737,7 +843,8 @@ func proxyExists(newProxy map[string]any, existingProxies []map[string]any) bool
 				continue
 			}
 		case "ssh":
-			if existing["username"] != newProxy["username"] || (existing["password"] != newProxy["password"] && existing["private-key"] != newProxy["private-key"]) {
+			// username 不同，或 password/private-key 任一不同，即视为不同节点。
+			if existing["username"] != newProxy["username"] || existing["password"] != newProxy["password"] || existing["private-key"] != newProxy["private-key"] {
 				continue
 			}
 		case "http", "socks", "socks5", "socks4":

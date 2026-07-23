@@ -1,4 +1,114 @@
 # 功能调整/变更说明
+## [2026-07-23] Web 面板精简：移除与阶段卡重复的详细统计长文本
+
+**调整内容**:
+1. 移除 `#detailStats` 详细统计长文本行：其展示的「存活/测速通过/媒体检测/阶段进度/阶段成功/阶段成功率」等，现已在上方各阶段步骤卡中结构化呈现，属重复信息，长串文本反而降低可读性。
+2. 保留任务进度行（作为底部进度条的文字数值 label：任务进度 / 成功 / 失败 / 百分比），并将原长文本中独有的「预计剩余(ETA)」并入该行（`#etaText`）。
+
+**影响范围**:
+1. `core/admin.html` - 删除 `detailStatsText` 元素及 `updateProgressBar` 中的长文本拼接逻辑；ETA 改为独立 `#etaText` 展示；`updateStatus` 的两处重置逻辑同步从 `detailStatsText` 切换为 `etaText`。
+
+**注意事项**:
+1. 纯前端展示精简，无后端接口变化；进度条与阶段卡承载全部统计，信息不丢失（ETA 已保留）。
+2. `go build` 与前端 JS 语法检查均通过。
+
+## [2026-07-23] 流水线检测统计增强 + Web 面板显示优化 + 数据库磁盘回收
+
+**调整内容**:
+1. 媒体检测按平台细分统计：`ProgressTracker` 新增平台级计数（OpenAI/Netflix/Disney/YouTube/Gemini/TikTok），媒体检测完成后按节点结果累加；`GetDetailedStats` 输出 `mediaPlatform`。
+2. 测速平均速度：`ProgressTracker` 累计成功测速节点的速度（`AddSpeedSample`），`GetDetailedStats` 输出 `avgSpeedKBps`。
+3. ETA 预计剩余时间：新增 `GetETA()`，基于存活检测进度与已用时间估算整体剩余秒数；`/api/status` 输出 `eta`。
+4. 数据库磁盘回收：新增 `DB.CompactDB()`（复用 `compactDBFile`，所有失败路径均重开连接），`app.go` 每 24 轮检测后触发一次，回收已删除历史批次占用的磁盘空间。
+5. 订阅拉取并发优化：`proxyChan` 缓冲由 1 增大到 1024，减少 1000 并发下生产者阻塞。
+6. Web 面板显示优化：测活卡显示实时存活率；测速卡显示平均速度（自动 KB/s↔MB/s）；媒体卡由冗余的“成功/失败”改为各平台解锁数细分展示；详情区新增“预计剩余”（ETA）。
+
+**影响范围**:
+1. `checker/progress.go` - 平台细分/速度累计字段、`AddSpeedSample`/`AddMediaResult`/`GetETA`、`GetDetailedStats` 扩展。
+2. `checker/pipeline.go` - 测速与媒体检测后记录统计。
+3. `core/handlers.go` - `/api/status` 输出 `eta`（`mediaPlatform`/`avgSpeedKBps` 随 `stageStats` 输出）。
+4. `output/db.go` + `core/app.go` - `CompactDB` 与周期性触发。
+5. `provider/fetch.go` - `proxyChan` 缓冲。
+6. `core/admin.html` - 阶段卡与详情区展示增强、`formatSpeed`。
+
+**注意事项**:
+1. `CompactDB` 会短暂关闭/重开连接，期间并发的 API 读可能短暂返回错误（低频、快速）；触发间隔 `compactEveryNChecks=24` 可按需调整。
+2. 媒体“成功/失败”原本 success=总数、failed=0 意义不大，已用平台细分替代，展示更直观。
+3. ETA 为基于存活阶段进度的粗略估算，仅供参考。
+4. `go build` / `go vet` / `gofmt` 及前端 JS 语法均通过。
+
+## [2026-07-23] 修复数据库无限增长 + 订阅阶段节点数实时显示
+
+**调整内容**:
+1. 【关键·性能】修复 `output/db.go` `ReplaceCurrentBatch` 的数据库无限增长问题：此前每次检测仅把当前批（Batch=0）标记降级为上一批（Batch=-1）并插入新批次，**从不删除任何记录**，导致历史批次（全部为 -1）随每次检测无限累积。第 K 次检测后库中约有 K×N 条记录，使 `ReplaceCurrentBatch`/`loadProxyList`/`queryBatch` 的全量遍历越来越慢，检测周期与订阅拉取整体变慢并有超时风险。
+   - 修复后：每次持久化只保留最近两批——删除更早的 previous、将 current 降级为 previous、写入新的 current；首次运行即自动清理历史膨胀。
+   - 附带修正语义问题：此前 `QueryRecords` 在 current 为空时回退查询 `BatchPrevious(-1)` 会返回所有历史批次的混合数据，修复后仅返回真正的上一批。
+2. 【功能·可观测性】订阅获取阶段实时显示已解析节点数：新增 `provider.SubsFetchNodeCount` 原子计数器，收集协程每追加一个节点即累加；`/api/status` 暴露 `subsFetchNodeCount`；Web 面板“订阅获取”步骤卡新增“节点”实时计数。此前节点总数需等全部订阅拉取完成、进入检测阶段才显示。
+
+**影响范围**:
+1. `output/db.go` - `ReplaceCurrentBatch` 批次清理逻辑。
+2. `provider/fetch.go` - 新增 `SubsFetchNodeCount` 计数器及初始化/累加。
+3. `core/handlers.go` - `/api/status` 新增 `subsFetchNodeCount` 字段。
+4. `core/admin.html` - 订阅获取步骤卡显示实时节点数。
+
+**注意事项**:
+1. `ReplaceCurrentBatch` 修复不改变 `QueryRecords` 的 current→previous 回退语义，行为兼容；首次运行会删除全部历史批次记录（一次性较大删除事务，在检测完成后的持久化阶段执行，不影响订阅拉取阶段）。
+2. bbolt 删除记录后文件大小不会自动收缩（空闲页由后续写入复用，文件规模趋于稳定、不再无限增长）；如需回收已膨胀的磁盘空间，可在停止服务后删除 `output/subs.db` 让其重建，或依赖现有 compact（当前仅在鉴权记录迁移时触发一次）。
+3. `go build` / `go vet` / `gofmt` 均通过。
+
+## [2026-07-23] 代码梳理：删除死代码、加固日志读取边界
+
+**调整内容**:
+1. 删除 `core/handlers.go` 中的死函数 `isProxyDuplicate`（约 164 行）：全项目无任何调用，是被 `output/db.go` 的 `proxyExists` 取代的遗留实现，且内部含与 `proxyExists` 相同的 hysteria/ssh 凭证别名 `&&` 判断问题；删除以消除重复实现与维护隐患。
+2. `ReadLastNLines` 增加 `n<=0` 卫语句：避免 `make([]string, 负数)` 或 `count%0`（n==0）触发 panic。当前调用方 `getLogs` 传入固定值 100 不会触发，属函数契约健壮性加固。
+
+**影响范围**:
+1. `core/handlers.go` - 删除死代码、日志读取函数边界保护。
+
+**注意事项**:
+1. `isProxyDuplicate` 为包私有且无调用点，删除不影响编译与运行（`go build` / `go vet` 均通过）。实际去重逻辑由 `output/db.go` 的 `proxyExists` 承担（其别名判断已在本轮之前的修复中改为 `||`）。
+2. 本轮审计另发现但未改动的既有情况：`updateConfig` 在加锁前写 `config.GlobalConfig.SubToken`（与鉴权/订阅读构成数据竞争，根因是 `GlobalConfig` 无统一锁，属架构级）；`getConfig` 在 API Key 校验后明文返回完整配置（含密钥，设计如此）；配置文件写入权限为 `0644`。以上留待评估，未在本轮改动。
+
+## [2026-07-23] 前端安全加固：Web 面板 XSS 转义
+
+**调整内容**:
+1. 新增 `escapeHtml()` 辅助函数，`core/admin.html` 渲染动态内容前统一做 HTML 转义。
+2. `colorizeLog()` 在着色前先对整行日志做 HTML 转义，修复日志渲染的存储型 XSS：日志包含节点名、订阅 URL、错误详情等外部可控数据，此前经 `innerHTML` 渲染时未转义，可被注入并在管理员查看面板时执行。
+3. 黑名单表格渲染对 `key`、`failCount`、`lastScope`、封禁时间等字段做转义（纵深防御），避免 `innerHTML` 拼接被注入。
+
+**影响范围**:
+1. `core/admin.html` - 日志区与黑名单表格的动态内容渲染。
+
+**注意事项**:
+1. 转义在颜色着色之前进行；日志级别（INF/ERR/WRN/DBG）与时间戳均为 ASCII，不受转义影响，颜色标记正常。
+2. 黑名单 `key` 为后端经 `net.ParseIP` 校验的 IP，本身已不含 HTML 危险字符；此处转义为纵深防御，防止未来来源变化。
+3. 纯前端改动，不涉及后端接口与配置，`go build` / `go vet` 均通过。
+
+## [2026-07-23] 安全优化：资源泄漏、并发竞争、密钥强度与去重修复
+
+**调整内容**:
+1. 修复 `provider/fetch.go` 订阅拉取四个阶段在重试循环内使用 `defer resp.Body.Close()` 的问题，改为读取后立即关闭，避免连接在整个 `GetDateFromSubs` 调用期间累积不释放。
+2. `provider/fetch.go` 读取订阅响应体改用 `io.LimitReader` 限制最大 64MiB，防止恶意/故障订阅源返回超大内容导致 OOM。
+3. `checker/pipeline.go` 全局进度追踪器由裸指针 `CurrentTracker` 改为 `atomic.Pointer[ProgressTracker]`（私有 `currentTracker`），并新增 `GetCurrentTracker()` 读取方法，消除检测 goroutine 写入与 `/api/status` 读取之间的数据竞争及潜在 nil panic。
+4. `core/server.go` `GenerateSimpleKey` 由 6 位十进制数字（约百万量级）改为 `crypto/rand` 生成的 128 位随机值，提升自动生成 API Key 的强度。
+5. `output/db.go` `proxyExists` 去重逻辑：`hysteria/hysteria2/hy2`、`anytls/snell`、`ssh` 分支的凭证别名比较由 `&&` 改为 `||`，与其余协议分支保持一致，修复“同服务器不同密码”节点被误判为重复而丢弃的问题。
+6. `output/db.go` `CleanupAuthFailures` 改用“先收集 key 再统一删除”的延迟删除模式，避免在 bbolt cursor 遍历过程中 `Delete` 导致跳过相邻记录（与 `MigrateAuthRecords` 保持一致）。
+7. `core/handlers.go` `/api/config/add` 对 `sub_url` 增加换行/回车字符校验，防止写入 `config.yaml` 时注入额外 YAML 行。
+8. 将 `.copilot-instructions.md` 更名为 `AGENTS.md`，并补充项目技术栈、目录结构、构建命令等上下文。
+
+**影响范围**:
+1. `provider/fetch.go` - 四阶段 body 关闭与读取大小限制。
+2. `checker/pipeline.go`、`core/handlers.go` - 进度追踪器改为原子指针及其读取点。
+3. `core/server.go` - API Key 生成强度。
+4. `output/db.go` - 节点去重逻辑与鉴权记录清理。
+5. `core/handlers.go` - 订阅链接输入校验。
+6. `AGENTS.md`（原 `.copilot-instructions.md`）。
+
+**注意事项**:
+1. 以上修复均不改变对外 API、配置项与输出格式，属行为兼容的健壮性/安全加固。
+2. 去重逻辑改为 `||` 后，同 `server:port` 但凭证不同的节点将被保留（此前会被误删），可能使可用节点数略有增加，属预期修正。
+3. 订阅响应体上限 64MiB 远高于正常订阅体积，不影响合法订阅。
+4. `CurrentTracker` 已改为包内私有 `currentTracker`（`atomic.Pointer`），包外请通过 `checker.GetCurrentTracker()` 读取。
+
 ## [2026-05-25] 安全加固：订阅鉴权与 API 防护
 
 **调整内容**:
