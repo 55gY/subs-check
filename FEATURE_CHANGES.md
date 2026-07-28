@@ -1,4 +1,63 @@
 # 功能调整/变更说明
+## [2026-07-28] 修复大规模检测超时致大量节点未测 + 阶段3统计口径矛盾
+
+**问题**（用户实测日志）：约 12 万节点检测，存活检测阶段 246 秒后整体超时，**仅测试 15708 个（87% 未测试）**，最终可用仅 324；且阶段3日志出现“成功(324) > 总数(218)”的矛盾。
+
+**根因与修复**：
+1. `config.Timeout` 默认值缺失（为 0）→ 存活检测的 HTTP client 无超时，失活节点要等系统 TCP 超时才失败，长时间占满 1000 个并发槽。现将默认值设为 `5000`（毫秒），失活节点快速失败。
+2. `calcCheckTimeout` 用固定“每批 2 秒”估算总超时，对大规模节点严重偏低（12 万节点仅 246 秒）。改为按存活检测的**实际**单节点超时估算每批耗时：统一延迟模式（`unified-delay`）用 `warmup-timeout + test-timeout`，否则用 `config.timeout`；并对每批耗时做 [2s, 60s] 区间保护（避免 `timeout` 异常大值如 1000000 导致估算爆表）；总超时上限由 1800s 提高到 3600s。
+3. 阶段3（媒体）日志“总数”错用 `speedSuccessTotal`（测速成功数），而媒体检测实际对所有存活成功节点执行，导致“成功 > 总数”。改用 `aliveSuccessTotal`，口径一致。
+
+**影响范围**：
+1. `config/config.go` - `GlobalConfig` 新增 `Timeout` 默认值 5000。
+2. `checker/pipeline.go` - `calcCheckTimeout` 估算逻辑；阶段3统计口径（日志 2 处）。
+
+**注意事项**：
+1. `config.Timeout` 默认 5000ms 会让存活检测单节点最多等 5 秒（此前无超时）；若有响应较慢但可用的节点，可在配置文件中调大 `timeout`。
+2. 媒体检测对所有存活成功节点执行（测速失败不淘汰节点），属“存活即可用”语义；阶段3统计现以存活成功数为分母。
+3. `go build` / `go vet` / `gofmt` 均通过。
+
+## [2026-07-23] 统一去重逻辑：拉取去重与入库去重共用 provider.ProxyKey
+
+**背景**: 项目存在两套去重实现且标准不一致——`provider.DeduplicateProxies`（拉取批量去重，map O(N)）与 `output.proxyExists`（入库增量去重，线性 O(N²)）。前者为通用键、后者按协议精确判定，对“是否同一节点”可能给出不同结论。
+
+**调整内容**:
+1. 新增导出函数 `provider.ProxyKey(proxy)`：作为“同一节点”的统一判定标准，按协议类型选择关键字段生成去重键，融合原 `proxyExists` 的精度（vmess 的 alterId、ssr 的 protocol/obfs、trojan 的 sni、wireguard 的 public-key、mieru/ssh 的 username 等）；凭证别名字段（password↔auth/psk/private-key）取第一个非空值。
+2. `provider.DeduplicateProxies` 改用 `ProxyKey`。
+3. `output.InsertRecordsDedup` 改用 `proxyutils.ProxyKey` 的 map 去重（与拉取阶段同一标准），复杂度从 O(N²) 降为 O(N)；删除不再需要的 `proxyExists`。
+4. `output` 包新增对底层 `provider` 包的依赖（provider 不反向依赖，无循环）。
+
+**影响范围**:
+1. `provider/process.go` - 新增 `ProxyKey`/`firstNonEmpty`，`DeduplicateProxies` 调用。
+2. `output/db.go` - `InsertRecordsDedup` 改用统一键、删除 `proxyExists`、新增 import。
+3. `provider/process_test.go` - 补充别名凭证同一性、ProxyKey 稳定性等测试。
+
+**注意事项**:
+1. 统一后两处“同一节点”判定一致；别名字段处理比旧 `proxyExists` 的 `||` 更准确（同凭证不同字段名视为同一）。
+2. 入库去重性能提升（O(N²)→O(N)）。
+3. `go build` / `go vet` / `go test ./provider/` / `gofmt` 均通过。
+
+## [2026-07-23] 修复节点去重过度（去重键缺失协议类型与部分凭证字段）
+
+**问题**: 用户实测 41 万节点去重后仅剩 2.4 万，去重率异常偏高。
+
+**根因**: `provider/process.go` 的 `DeduplicateProxies` 去重键为 `server:port:servername:password(或uuid)`，存在两处缺陷：
+1. 不含协议类型 `type` —— 同 server:port 的不同协议节点会碰撞；
+2. 凭证仅取 `password`/`uuid` —— `hysteria`(auth)、`snell`(psk)、`wireguard`(private-key)、`ssh`(private-key) 等协议的凭证字段不同，其凭证部分为空，导致同一 server:port 上这类不同节点被合并成一个（叠加 servername 常为空，碰撞更严重）。
+
+**调整内容**:
+1. 新增 `proxyDedupKey`，去重键纳入 `type` + 按协议回退提取的多种凭证字段(`password`/`uuid`/`auth`/`auth-str`/`psk`/`private-key`/`key`/`token`，带字段名前缀避免跨字段同值碰撞) + `cipher`/`network`。
+2. 新增 `provider/process_test.go` 单元测试：验证不同协议/凭证节点不再被误合并、真重复仍去重、同服务器不同密码保留、空 server 跳过；并含旧键碰撞的对比断言（4 个不同节点在旧键下被去重成 2 个）。
+
+**影响范围**:
+1. `provider/process.go` - `DeduplicateProxies` 去重键逻辑（新增 `proxyDedupKey`）。
+2. `provider/process_test.go` - 新增去重单元测试。
+
+**注意事项**:
+1. 修复方向为“减少误合并、保留更多合法节点”，修复后去重结果会显著多于此前（更接近真实去重）。
+2. 仍以 map 实现 O(N) 去重，大规模节点无性能回归。
+3. `go test ./provider/`、`go build`、`go vet` 均通过。
+
 ## [2026-07-23] Web 面板精简：移除与阶段卡重复的详细统计长文本
 
 **调整内容**:

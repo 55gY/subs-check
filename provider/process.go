@@ -20,14 +20,7 @@ func DeduplicateProxies(proxies []map[string]any) []map[string]any {
 		if server == "" {
 			continue
 		}
-		servername, _ := proxy["servername"].(string)
-
-		password, _ := proxy["password"].(string)
-		if password == "" {
-			password, _ = proxy["uuid"].(string)
-		}
-
-		key := fmt.Sprintf("%s:%v:%s:%s", server, proxy["port"], servername, password)
+		key := ProxyKey(proxy)
 		if !seenKeys[key] {
 			seenKeys[key] = true
 			result = append(result, proxy)
@@ -35,6 +28,59 @@ func DeduplicateProxies(proxies []map[string]any) []map[string]any {
 	}
 
 	return result
+}
+
+// firstNonEmpty 返回参数中第一个非空字符串。
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// ProxyKey 生成节点的唯一标识键，作为“同一节点”的统一判定标准，供拉取批量去重
+// （DeduplicateProxies）与入库增量去重（output.InsertRecordsDedup）共用，避免两套标准分歧。
+//
+// 按协议类型选择关键字段：凭证别名字段（password↔auth/psk/private-key）取第一个非空值，
+// 确保“同凭证不同字段名”视为同一节点；同时纳入 uuid/alterId、cipher、protocol/obfs、sni、
+// public-key、username 等各协议区分字段，避免不同协议或不同凭证的节点被误合并。
+func ProxyKey(proxy map[string]any) string {
+	get := func(k string) string { s, _ := proxy[k].(string); return s }
+	typ := get("type")
+	base := fmt.Sprintf("%s|%s|%v", typ, get("server"), proxy["port"])
+
+	switch typ {
+	case "vmess":
+		return base + "|" + get("uuid") + "|" + fmt.Sprintf("%v", proxy["alterId"])
+	case "vless":
+		return base + "|" + get("uuid")
+	case "ss", "shadowsocks":
+		return base + "|" + get("cipher") + "|" + get("password")
+	case "ssr":
+		return base + "|" + get("cipher") + "|" + get("password") + "|" + get("protocol") + "|" + get("obfs")
+	case "trojan":
+		return base + "|" + get("password") + "|" + get("sni")
+	case "hysteria", "hysteria2", "hy2":
+		return base + "|" + firstNonEmpty(get("password"), get("auth"), get("auth-str"))
+	case "tuic":
+		return base + "|" + get("uuid") + "|" + get("password")
+	case "anytls", "snell":
+		return base + "|" + firstNonEmpty(get("password"), get("psk"))
+	case "mieru":
+		return base + "|" + get("username") + "|" + get("password")
+	case "sudoku":
+		return base + "|" + get("key")
+	case "wireguard", "wg":
+		return base + "|" + get("private-key") + "|" + get("public-key")
+	case "ssh":
+		return base + "|" + get("username") + "|" + firstNonEmpty(get("password"), get("private-key"))
+	case "http", "socks", "socks5", "socks4":
+		return base + "|" + get("username")
+	default:
+		return base + "|" + get("name")
+	}
 }
 
 // ==================== 重命名功能 (from rename.go) ====================

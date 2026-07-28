@@ -61,8 +61,13 @@ func GetCurrentTracker() *ProgressTracker {
 	return currentTracker.Load()
 }
 
-// calcCheckTimeout 根据节点数量和并发数自动计算检测超时时间
-// 公式: 批次数 × 每批平均耗时(2秒)，最小120秒，最大1800秒(30分钟)
+// calcCheckTimeout 根据节点数量、并发数与存活检测的实际单节点超时自动计算总超时。
+// 每批(最慢节点)耗时按存活检测的真实超时估算：
+//   - 统一延迟模式(unified-delay)下为 warmup-timeout + test-timeout；
+//   - 否则为 config.timeout。
+// 并对每批耗时做 [2s,60s] 区间保护，避免异常配置(如 timeout=1000000)导致估算爆表。
+// 固定 2 秒/批的旧估算对大规模节点严重偏低，会导致大量节点未测即整体超时。
+// 结果限制在 [120s, 3600s]。
 func calcCheckTimeout(nodeCount, concurrent int) time.Duration {
 	if concurrent <= 0 {
 		concurrent = 100
@@ -71,12 +76,35 @@ func calcCheckTimeout(nodeCount, concurrent int) time.Duration {
 		return 120 * time.Second
 	}
 	batches := math.Ceil(float64(nodeCount) / float64(concurrent))
-	timeout := time.Duration(batches) * 2 * time.Second
+
+	// 估算单批(最慢节点)耗时：失活节点会等满超时才失败。
+	cfg := config.GlobalConfig
+	var perBatch time.Duration
+	if cfg.UnifiedDelay {
+		w := time.Duration(cfg.WarmupTimeout) * time.Second
+		if w <= 0 {
+			w = 15 * time.Second
+		}
+		t := time.Duration(cfg.TestTimeout) * time.Second
+		if t <= 0 {
+			t = 10 * time.Second
+		}
+		perBatch = w + t
+	} else if cfg.Timeout > 0 {
+		perBatch = time.Duration(cfg.Timeout) * time.Millisecond
+	}
+	if perBatch < 2*time.Second {
+		perBatch = 2 * time.Second
+	}
+	if perBatch > 60*time.Second {
+		perBatch = 60 * time.Second
+	}
+	timeout := time.Duration(int64(batches)) * perBatch
 	if timeout < 120*time.Second {
 		timeout = 120 * time.Second
 	}
-	if timeout > 1800*time.Second {
-		timeout = 1800 * time.Second
+	if timeout > 3600*time.Second {
+		timeout = 3600 * time.Second
 	}
 	return timeout
 }
@@ -285,12 +313,12 @@ finished:
 	}
 	if mediaON {
 		slog.Info("======== 阶段3: 媒体检测 ========")
-		slog.Info("阶段3完成", "阶段", "媒体检测", "总数", speedSuccessTotal, "成功", mediaDoneTotal, "失败", 0)
+		slog.Info("阶段3完成", "阶段", "媒体检测", "总数", aliveSuccessTotal, "成功", mediaDoneTotal, "失败", 0)
 	}
 	slog.Info("阶段完成统计",
 		"阶段1-存活", fmt.Sprintf("总数=%d 已测试=%d 成功=%d 失败=%d 未测试=%d", totalNodes, aliveDoneTotal, aliveSuccessTotal, aliveFailedTotal, untestedTotal),
 		"阶段2-测速", fmt.Sprintf("总数=%d 成功=%d 失败=%d", aliveSuccessTotal, speedSuccessTotal, speedDoneTotal-speedSuccessTotal),
-		"阶段3-媒体", fmt.Sprintf("总数=%d 成功=%d 失败=%d", speedSuccessTotal, mediaDoneTotal, 0))
+		"阶段3-媒体", fmt.Sprintf("总数=%d 成功=%d 失败=%d", aliveSuccessTotal, mediaDoneTotal, 0))
 	slog.Info("检测完成统计",
 		"总节点数", totalNodes,
 		"已测试", aliveDoneTotal,

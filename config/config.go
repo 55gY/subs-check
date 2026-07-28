@@ -68,6 +68,7 @@ var GlobalConfig = &Config{
 	SubUrlsRetryFailed:  -1, // 默认永不删除，避免误删用户订阅
 	SubUrlsMinNodeCount: 0,  // 默认不启用节点数量检查
 	Filters:             []string{"CN"},
+	Timeout:             5000, // 单节点检测超时(毫秒)。默认曾为 0(无超时)，会让失活节点等待系统 TCP 超时，严重拖慢大规模检测
 	// 统一延迟配置默认值
 	UnifiedDelay:  false, // 默认关闭，保持向后兼容
 	WarmupTimeout: 15,    // 预热超时 15 秒

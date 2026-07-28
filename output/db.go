@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	proxyutils "github.com/55gY/subs-check/provider"
 	bbolt "github.com/metacubex/bbolt"
 )
 
@@ -141,16 +142,22 @@ func (db *DB) InsertRecordsDedup(records []DBNodeRecord) (int, int, error) {
 		if err != nil {
 			return err
 		}
-		pending := make([]map[string]any, 0, len(records))
+		// 用统一的 ProxyKey 做 O(N) 去重（与拉取阶段 DeduplicateProxies 同一判定标准）
+		seen := make(map[string]bool, len(existing)+len(records))
+		for _, p := range existing {
+			seen[proxyutils.ProxyKey(p)] = true
+		}
 
 		for _, record := range records {
 			if record.Proxy == nil {
 				continue
 			}
-			if proxyExists(record.Proxy, existing) || proxyExists(record.Proxy, pending) {
+			key := proxyutils.ProxyKey(record.Proxy)
+			if seen[key] {
 				duplicates++
 				continue
 			}
+			seen[key] = true
 
 			if record.Batch != BatchCurrent && record.Batch != BatchPrevious {
 				record.Batch = BatchCurrent
@@ -171,7 +178,6 @@ func (db *DB) InsertRecordsDedup(records []DBNodeRecord) (int, int, error) {
 				return fmt.Errorf("写入记录失败: %w", err)
 			}
 
-			pending = append(pending, record.Proxy)
 			added++
 		}
 		return nil
@@ -784,84 +790,6 @@ func loadProxyList(bucket *bbolt.Bucket) ([]map[string]any, error) {
 		}
 	}
 	return proxies, nil
-}
-
-func proxyExists(newProxy map[string]any, existingProxies []map[string]any) bool {
-	for _, existing := range existingProxies {
-		if existing["type"] != newProxy["type"] || existing["server"] != newProxy["server"] || existing["port"] != newProxy["port"] {
-			continue
-		}
-
-		switch proxyType, _ := newProxy["type"].(string); proxyType {
-		case "vmess":
-			if existing["uuid"] != newProxy["uuid"] || existing["alterId"] != newProxy["alterId"] {
-				continue
-			}
-		case "vless":
-			if existing["uuid"] != newProxy["uuid"] {
-				continue
-			}
-		case "ss", "shadowsocks":
-			if existing["cipher"] != newProxy["cipher"] || existing["password"] != newProxy["password"] {
-				continue
-			}
-		case "ssr":
-			if existing["cipher"] != newProxy["cipher"] || existing["password"] != newProxy["password"] || existing["protocol"] != newProxy["protocol"] || existing["obfs"] != newProxy["obfs"] {
-				continue
-			}
-		case "trojan":
-			sni1, _ := existing["sni"].(string)
-			sni2, _ := newProxy["sni"].(string)
-			if existing["password"] != newProxy["password"] || sni1 != sni2 {
-				continue
-			}
-		case "hysteria", "hysteria2", "hy2":
-			// password 与 auth 是同一凭证的别名字段，任一不同即视为不同节点，
-			// 避免同服务器不同密码的节点被误判为重复而丢弃（与其余协议分支保持一致）。
-			if existing["password"] != newProxy["password"] || existing["auth"] != newProxy["auth"] {
-				continue
-			}
-		case "tuic":
-			if existing["uuid"] != newProxy["uuid"] || existing["password"] != newProxy["password"] {
-				continue
-			}
-		case "anytls", "snell":
-			// password 与 psk 为别名字段，任一不同即视为不同节点。
-			if existing["password"] != newProxy["password"] || existing["psk"] != newProxy["psk"] {
-				continue
-			}
-		case "mieru":
-			if existing["username"] != newProxy["username"] || existing["password"] != newProxy["password"] {
-				continue
-			}
-		case "sudoku":
-			if existing["key"] != newProxy["key"] {
-				continue
-			}
-		case "wireguard", "wg":
-			if existing["private-key"] != newProxy["private-key"] || existing["public-key"] != newProxy["public-key"] {
-				continue
-			}
-		case "ssh":
-			// username 不同，或 password/private-key 任一不同，即视为不同节点。
-			if existing["username"] != newProxy["username"] || existing["password"] != newProxy["password"] || existing["private-key"] != newProxy["private-key"] {
-				continue
-			}
-		case "http", "socks", "socks5", "socks4":
-			user1, hasUser1 := existing["username"].(string)
-			user2, hasUser2 := newProxy["username"].(string)
-			if hasUser1 && hasUser2 && user1 != user2 {
-				continue
-			}
-		default:
-			if existing["name"] != newProxy["name"] {
-				continue
-			}
-		}
-
-		return true
-	}
-	return false
 }
 
 func getAuthRecord(bucket *bbolt.Bucket, key string) (AuthFailureRecord, bool, error) {
