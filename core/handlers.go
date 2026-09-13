@@ -1213,6 +1213,9 @@ func parseSubscriptionNodes(data []byte) ([]map[string]any, error) {
 		}
 	}
 
+	// 统一交给后端 provider 层兼容 Shadowrocket 风格 vmess；
+	// ss/ssr/vless 等其他协议继续由 mihomo 转换器负责。
+	data = proxyutils.NormalizeV2RayLinks(data)
 	// 先尝试逐行提取链接（更可靠的方式）
 	lines := strings.Split(string(data), "\n")
 	var links []string
