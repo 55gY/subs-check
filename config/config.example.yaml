@@ -6,7 +6,7 @@ print-progress: true
 concurrent-stage:
   alive: 1000  # 存活检测并发数，处理全量节点，建议设置较高
   # speed: 100  # 测速检测并发数，只处理存活节点；若未设置，可由 network 自动推导
-  media: 50   # 媒体检测并发数，只处理测速通过的节点
+  media: 50   # 媒体检测并发数，对所有存活成功节点执行（测速失败不淘汰）
 
 # 服务器测速可用带宽峰值（MB/s）
 # 当未设置 concurrent-stage.speed 时，程序会基于该值自动推导测速并发

@@ -1,4 +1,23 @@
 # 功能调整/变更说明
+## [2026-09-13] 恢复分阶段并发流水线并修复热路径浪费
+
+**调整内容**:
+1. `Check()` 改为存活 / 测速 / 媒体三阶段 worker 池，分别使用 `concurrent-stage.alive`、`GetSpeedConcurrent()`、`GetMediaConcurrent()`。
+2. 存活成功节点进入后续队列；测速失败不淘汰，媒体仍对全部存活成功节点执行。
+3. 正则预编译、媒体/AI/IP 查询响应体加 `LimitReader`、限速按实际读取字节扣令牌。
+4. 代理客户端启用短时 Keep-Alive，统一延迟预热连接可复用。
+5. 删除未使用的 `PipelineItem`、`getConcurrency`、`showProgress` 及 `DelayTest` 写死本地代理分支。
+6. `Available` 在锁内更新；媒体阶段总量改回存活成功数。
+
+**影响范围**:
+1. `checker/pipeline.go`、`checker/client.go`、`checker/delay.go`、`checker/media.go`、`checker/ai.go`、`checker/progress.go`
+2. `provider/info.go`、`provider/fetch.go`
+3. `config/config.example.yaml`
+
+**注意事项**:
+1. 测速与媒体可与上一阶段流水重叠，但各自受独立并发限制。
+2. 强制停止或超时时，已存活节点仍会尽量写入结果。
+
 ## [2026-07-28] 修复大规模检测超时致大量节点未测 + 阶段3统计口径矛盾
 
 **问题**（用户实测日志）：约 12 万节点检测，存活检测阶段 246 秒后整体超时，**仅测试 15708 个（87% 未测试）**，最终可用仅 324；且阶段3日志出现“成功(324) > 总数(218)”的矛盾。

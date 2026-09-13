@@ -12,7 +12,7 @@ func CheckAlive(ctx context.Context, httpClient *http.Client) (bool, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{}
 	}
-	result := DelayTest(ctx, config.GlobalConfig.AliveTestUrl, httpClient, false)
+	result := DelayTest(ctx, config.GlobalConfig.AliveTestUrl, httpClient)
 	return result.Success, nil
 }
 
@@ -21,5 +21,5 @@ func CheckAliveWithWarmup(ctx context.Context, httpClient *http.Client) (bool, i
 	if httpClient == nil {
 		httpClient = &http.Client{}
 	}
-	return DelayTestWithWarmup(ctx, config.GlobalConfig.AliveTestUrl, httpClient, false)
+	return DelayTestWithWarmup(ctx, config.GlobalConfig.AliveTestUrl, httpClient)
 }

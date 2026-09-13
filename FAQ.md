@@ -40,10 +40,9 @@
 - 开启内存监控：`SUB_CHECK_MEM_MONITOR=1`
 ## 6. 节点检测速度太慢？
 建议：
-- 提高合适的并发数
+- 提高 `concurrent-stage.alive`；测速慢再调 `concurrent-stage.speed` 或 `network`
 - 减少或关闭媒体检测
 - 更换更稳定的测速地址
-- 使用 `success-limit` 控制输出规模
 ## 7. 某些订阅无法获取？
 建议：
 - 检查订阅链接是否有效

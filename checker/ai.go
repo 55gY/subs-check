@@ -14,7 +14,7 @@ func doRequestAndReadAIResponse(httpClient *http.Client, req *http.Request) ([]b
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMediaBodySize))
 	if err != nil {
 		return nil, err
 	}

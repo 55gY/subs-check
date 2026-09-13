@@ -28,10 +28,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var v2rayLinkRE = regexp.MustCompile(`(?i)(vmess|vless|ss|ssr|trojan|hysteria|hysteria2|tuic|juicity)://[a-zA-Z0-9\-_@.:/?=&%#]+`)
+
 // 订阅获取进度统计(供外部读取)
-var SubsFetchProgress atomic.Int32 // 已完成数
-var SubsFetchTotal atomic.Int32    // 总数
-var SubsFetchSuccess atomic.Int32  // 成功数
+var SubsFetchProgress atomic.Int32  // 已完成数
+var SubsFetchTotal atomic.Int32     // 总数
+var SubsFetchSuccess atomic.Int32   // 成功数
 var SubsFetchFailed atomic.Int32    // 失败数
 var SubsFetchNodeCount atomic.Int32 // 已解析节点数（订阅获取阶段实时累积）
 var SubsFetchActive atomic.Bool     // 订阅获取是否仍在进行中
@@ -152,7 +154,7 @@ func GetProxies() ([]map[string]any, []string, []string, map[string]bool, error)
 	}
 
 	var wg sync.WaitGroup
-	proxyChan := make(chan map[string]any, 1024)          // 缓冲通道存储解析的代理
+	proxyChan := make(chan map[string]any, 1024)       // 缓冲通道存储解析的代理
 	concurrentLimit := make(chan struct{}, 1000)       // 订阅拉取固定使用1000并发，不受concurrent限制
 	failedSubsChan := make(chan string, len(subUrls))  // 收集失败的订阅链接
 	successSubsChan := make(chan string, len(subUrls)) // 收集成功的订阅链接
@@ -716,9 +718,7 @@ func GetDateFromSubs(subUrl string) ([]byte, error) {
 }
 
 func extractV2RayLinks(data []byte) []string {
-	re := regexp.MustCompile(`(?i)(vmess|vless|ss|ssr|trojan|hysteria|hysteria2|tuic|juicity)://[a-zA-Z0-9\-_@.:/?=&%#]+`)
-	matches := re.FindAllString(string(data), -1)
-	return matches
+	return v2rayLinkRE.FindAllString(string(data), -1)
 }
 
 func guessSchemeByURL(url string) string {

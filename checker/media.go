@@ -10,13 +10,20 @@ import (
 	"strings"
 )
 
+const maxMediaBodySize = 2 * 1024 * 1024
+
+var (
+	youtubeRegionRe = regexp.MustCompile(`"INNERTUBE_CONTEXT_GL"\s*:\s*"([^"]+)"`)
+	tiktokRegionRe  = regexp.MustCompile(`"region"\s*:\s*"([A-Z]{2})"`)
+)
+
 func doRequestAndReadBody(httpClient *http.Client, req *http.Request) (*http.Response, []byte, error) {
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMediaBodySize))
 	closeErr := resp.Body.Close()
 	if err != nil {
 		if closeErr != nil {
@@ -49,8 +56,6 @@ func setDisneyFormHeaders(req *http.Request, userAgent, authorization string) {
 // CheckYoutube 检测 YouTube Premium 区域
 // 在body中查找 INNERTUBE_CONTEXT_GL 并提取区域代码
 func CheckYoutube(ctx context.Context, httpClient *http.Client) (string, error) {
-	re := regexp.MustCompile(`"INNERTUBE_CONTEXT_GL"\s*:\s*"([^"]+)"`)
-
 	// 创建请求
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.youtube.com/premium", nil)
 	if err != nil {
@@ -84,7 +89,7 @@ func CheckYoutube(ctx context.Context, httpClient *http.Client) (string, error) 
 	}
 
 	// 先检测上方是否送中，在检测位置
-	match := re.FindStringSubmatch(bodyText)
+	match := youtubeRegionRe.FindStringSubmatch(bodyText)
 	if len(match) >= 2 {
 		region := match[1]
 		if region != "" {
@@ -229,9 +234,7 @@ func CheckTikTok(ctx context.Context, httpClient *http.Client) (string, error) {
 		return "", nil
 	}
 
-	// 使用正则匹配 "region":"XX"
-	re := regexp.MustCompile(`"region"\s*:\s*"([A-Z]{2})"`)
-	matches := re.FindSubmatch(body)
+	matches := tiktokRegionRe.FindSubmatch(body)
 	if len(matches) >= 2 {
 		return string(matches[1]), nil
 	}

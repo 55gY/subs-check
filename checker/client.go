@@ -24,14 +24,13 @@ type statsConn struct {
 }
 
 func (c *statsConn) Read(b []byte) (n int, err error) {
-	// 速度限制（全局）
-	if c.bucket != nil {
-		c.bucket.Wait(int64(len(b)))
-	}
-
 	n, err = c.Conn.Read(b)
-	atomic.AddUint64(c.bytesRead, uint64(n))
-
+	if n > 0 {
+		if c.bucket != nil {
+			c.bucket.Wait(int64(n))
+		}
+		atomic.AddUint64(c.bytesRead, uint64(n))
+	}
 	return n, err
 }
 
@@ -82,12 +81,29 @@ func CreateClient(mapping map[string]any) *ProxyClient {
 				bucket:    Bucket,
 			}, nil
 		},
-		DisableKeepAlives: true,
+		MaxIdleConns:        1,
+		MaxIdleConnsPerHost: 1,
+		IdleConnTimeout:     5 * time.Second,
+	}
+
+	clientTimeout := time.Duration(config.GlobalConfig.Timeout) * time.Millisecond
+	if config.GlobalConfig.UnifiedDelay {
+		w := time.Duration(config.GlobalConfig.WarmupTimeout) * time.Second
+		t := time.Duration(config.GlobalConfig.TestTimeout) * time.Second
+		if w <= 0 {
+			w = 15 * time.Second
+		}
+		if t <= 0 {
+			t = 10 * time.Second
+		}
+		if w+t > clientTimeout {
+			clientTimeout = w + t
+		}
 	}
 
 	return &ProxyClient{
 		Client: &http.Client{
-			Timeout:   time.Duration(config.GlobalConfig.Timeout) * time.Millisecond,
+			Timeout:   clientTimeout,
 			Transport: baseTransport,
 		},
 		proxy:     proxy,

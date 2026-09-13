@@ -185,6 +185,7 @@ curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8199/api/status
 - **低配置（1-2 核）**：`concurrent-stage.alive: 10-20`
 - **中等配置（4 核）**：`concurrent-stage.alive: 20-50`
 - **高配置（8+ 核）**：`concurrent-stage.alive: 50-100`
+- 测速 / 媒体并发分别由 `concurrent-stage.speed`（或 `network` 推导）和 `concurrent-stage.media` 控制，不再占用存活检测的并发槽
 
 ### 内存限制
 

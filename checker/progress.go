@@ -342,8 +342,6 @@ func (pt *ProgressTracker) refresh() {
 	aliveFail := aliveDone - float64(pt.aliveSuccess.Load())
 
 	speedDone := float64(pt.speedDone.Load())
-	speedFail := speedDone - float64(pt.speedSuccess.Load())
-
 	mediaDone := float64(pt.mediaDone.Load())
 
 	// 计算加权进度
@@ -354,8 +352,9 @@ func (pt *ProgressTracker) refresh() {
 	// 解释：存活失败的节点虽然没测速，但它对测速阶段进度的贡献是“已处理”
 	pSpeed := ((speedDone + aliveFail) / total) * progressWeight.speed
 
-	// 媒体阶段贡献：((已媒体 + 测速失败 + 存活失败) / 总数) * 权重
-	pMedia := ((mediaDone + speedFail + aliveFail) / total) * progressWeight.media
+	// 媒体阶段贡献：((已媒体 + 存活失败) / 总数) * 权重
+	// 测速失败仍会进入媒体检测，不能把 speedFail 算作媒体已完成。
+	pMedia := ((mediaDone + aliveFail) / total) * progressWeight.media
 
 	currentProgress := pAlive + pSpeed + pMedia
 
@@ -419,8 +418,8 @@ func (pt *ProgressTracker) GetStageInfo() (stage int32, name string, done, succe
 		total = pt.aliveSuccess.Load()
 	case 2: // 媒体检测
 		done = pt.mediaDone.Load()
-		success = pt.mediaDone.Load() // 媒体检测不区分成功失败，完成即视为成功
-		total = pt.speedSuccess.Load()
+		success = pt.mediaSuccess.Load()
+		total = pt.aliveSuccess.Load()
 	}
 	return
 }

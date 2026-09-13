@@ -19,7 +19,7 @@ func doRequestAndReadBody(httpClient *http.Client, req *http.Request) (*http.Res
 		return nil, nil, err
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
 	closeErr := resp.Body.Close()
 	if err != nil {
 		if closeErr != nil {
